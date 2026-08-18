@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Dados brutos nunca vao para o repositorio
+data/
+*.json.gz
+*.csv
+
+# Credenciais: jamais commitar
+*.json.key
+service-account*.json
+.env
+.env.*
+
+.DS_Store
+.idea/
+.vscode/
