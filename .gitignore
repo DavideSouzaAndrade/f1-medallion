@@ -18,3 +18,4 @@ service-account*.json
 .DS_Store
 .idea/
 .vscode/
+.df-credentials.json

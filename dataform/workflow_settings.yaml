@@ -1,0 +1,13 @@
+defaultProject: pdm-davi-2026
+defaultLocation: US
+
+# Prefixo f1_ de proposito: o projeto GCP e compartilhado com outras
+# disciplinas, e "bronze"/"silver"/"gold" sao nomes genericos demais.
+defaultDataset: f1_bronze
+defaultAssertionDataset: f1_bronze
+
+dataformCoreVersion: 3.0.0
+
+vars:
+  bucket: f1-raw-pdm-davi-2026
+  prefixo: openf1
