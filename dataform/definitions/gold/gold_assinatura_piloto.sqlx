@@ -1,0 +1,114 @@
+config {
+  type: "table",
+  schema: "f1_gold",
+  name: "gold_assinatura_piloto",
+  tags: ["gold", "modelo_piloto"],
+  description: "Tabela de treino do modelo 2: classificacao do piloto pela assinatura de pilotagem. Uma linha por (piloto, volta), com a telemetria da volta resumida em estatisticas de estilo.",
+  bigquery: { clusterBy: ["driver_number", "circuit_key"] },
+  columns: {
+    rotulo_piloto: "Variavel resposta: quem estava no carro.",
+    pct_acelerador_pleno: "Fracao da volta com acelerador em 100%. Piloto agressivo mantem mais tempo.",
+    pct_freando: "Fracao da volta com freio acionado.",
+    trocas_marcha: "Numero de trocas de marcha na volta. Assinatura de como o piloto usa a caixa.",
+    suavidade_acelerador: "Desvio padrao da variacao do acelerador entre amostras consecutivas. Baixo = entrada suave.",
+    amostras_validas: "Quantas amostras de telemetria sustentam esta linha. Linhas com poucas amostras sao ruido."
+  },
+  assertions: {
+    nonNull: ["rotulo_piloto", "session_key", "lap_number"]
+  }
+}
+
+-- Recorte: telemetria em pista, dentro de uma volta identificada, sem o
+-- sentinela 104.
+--
+-- O sentinela merece cuidado: ele invalida throttle e brake, nao a linha
+-- inteira. Aqui, como as features SAO de acelerador e freio, as amostras com
+-- sentinela precisam sair. Mas isso e decisao desta Gold, nao da Silver --
+-- a Gold do modelo de pneu, por exemplo, poderia usar velocidade e rpm dessas
+-- mesmas linhas.
+
+WITH amostras AS (
+  SELECT
+    t.session_key,
+    t.driver_number,
+    t.lap_number,
+    t.data,
+    t.speed, t.rpm, t.n_gear, t.throttle, t.brake, t.drs_aberto,
+    -- Variacao em relacao a amostra anterior: mede suavidade
+    t.throttle - LAG(t.throttle) OVER (
+      PARTITION BY t.session_key, t.driver_number, t.lap_number ORDER BY t.data
+    ) AS delta_throttle,
+    t.n_gear <> LAG(t.n_gear) OVER (
+      PARTITION BY t.session_key, t.driver_number, t.lap_number ORDER BY t.data
+    ) AS trocou_marcha
+  FROM ${ref("silver_telemetria")} t
+  WHERE t.lap_number IS NOT NULL
+    AND t.em_pista
+    AND NOT t.telemetria_sentinela
+),
+
+por_volta AS (
+  SELECT
+    session_key, driver_number, lap_number,
+    COUNT(*) AS amostras_validas,
+
+    -- Velocidade
+    ROUND(AVG(speed), 2)               AS vel_media,
+    MAX(speed)                         AS vel_maxima,
+    ROUND(STDDEV(speed), 2)            AS vel_desvio,
+
+    -- Acelerador: quanto e como
+    ROUND(AVG(throttle), 2)                             AS acelerador_medio,
+    ROUND(AVG(IF(throttle >= 99, 1, 0)), 4)             AS pct_acelerador_pleno,
+    ROUND(AVG(IF(throttle = 0,  1, 0)), 4)              AS pct_acelerador_solto,
+    ROUND(STDDEV(delta_throttle), 3)                    AS suavidade_acelerador,
+
+    -- Freio
+    ROUND(AVG(IF(brake > 0, 1, 0)), 4)                  AS pct_freando,
+
+    -- Motor e caixa
+    ROUND(AVG(CAST(rpm AS FLOAT64)), 0)                 AS rpm_medio,
+    MAX(rpm)                                            AS rpm_maximo,
+    ROUND(AVG(CAST(n_gear AS FLOAT64)), 2)              AS marcha_media,
+    COUNTIF(trocou_marcha)                              AS trocas_marcha,
+
+    -- DRS
+    ROUND(AVG(IF(drs_aberto, 1, 0)), 4)                 AS pct_drs_aberto
+  FROM amostras
+  GROUP BY 1, 2, 3
+)
+
+SELECT
+  p.session_key,
+  p.driver_number,
+  p.lap_number,
+  s.year,
+  s.circuit_key,
+  s.circuito,
+  s.session_name,
+
+  -- Alvo: quem pilotava. Usa a sigla quando existe, senao o numero.
+  COALESCE(d.sigla, CAST(p.driver_number AS STRING)) AS rotulo_piloto,
+  d.nome_completo,
+  d.equipe,
+
+  p.* EXCEPT(session_key, driver_number, lap_number),
+
+  -- Contexto da volta, para a Gold poder controlar por situacao
+  v.composto,
+  v.idade_pneu,
+  v.duracao_s,
+  v.volta_limpa,
+
+  CURRENT_TIMESTAMP() AS _data_processamento_gold
+FROM por_volta p
+JOIN ${ref("silver_sessoes")} s ON s.session_key = p.session_key
+LEFT JOIN ${ref("silver_pilotos")} d
+  ON d.session_key = p.session_key AND d.driver_number = p.driver_number
+LEFT JOIN ${ref("silver_voltas")} v
+  ON v.session_key = p.session_key AND v.driver_number = p.driver_number
+ AND v.lap_number  = p.lap_number
+WHERE s.eh_corrida
+  AND NOT s.eh_teste
+  -- Uma volta com poucas amostras nao sustenta estatistica de estilo
+  AND p.amostras_validas >= 100
