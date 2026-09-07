@@ -436,3 +436,43 @@ Não filtra linha, não agrega e não decide o que é volta válida. Ela tipa,
 deduplica, desmembra campos mistos, resolve o *as-of join* e **expõe
 colunas de diagnóstico**. Quem escolhe o recorte é a Gold, e cada modelo
 escolhe o seu.
+
+---
+
+## 9. Combustível mascara a degradação do pneu
+
+Descoberto ao validar a `silver_voltas`: olhando a média crua, o ritmo
+**melhora** com a idade do pneu, o que contraria a física. A investigação
+mostrou por quê.
+
+Restrição: apenas corridas, voltas limpas, stints válidos, compostos secos.
+Métrica: `razao_melhor_sessao` = tempo da volta ÷ melhor volta da sessão.
+
+| Eixo | Faixa | Voltas | Ritmo |
+|---|---|---:|---:|
+| **Volta da corrida** (proxy de combustível) | 01–10 | 11.338 | 1,0476 |
+| | 11–25 | 17.425 | 1,0439 |
+| | 26–40 | 14.113 | 1,0384 |
+| | 41+ | 19.390 | **1,0335** |
+| **Volta dentro do stint** (idade do pneu) | 01–05 | 15.471 | 1,0426 |
+| | 06–10 | 13.929 | 1,0393 |
+| | 11–20 | 20.540 | 1,0387 |
+| | 21+ | 12.326 | **1,0402** |
+
+**O efeito do combustível é forte e monotônico:** o carro fica ~1,4% mais
+rápido da primeira à última faixa de voltas, simplesmente porque ficou mais
+leve. Esse efeito é maior que a degradação e tem sinal contrário, então
+esconde o fenômeno.
+
+**Dentro do stint aparece a curva em U esperada:** as primeiras voltas são
+lentas com o pneu frio, o ponto ótimo cai entre a 6ª e a 20ª volta, e a
+partir da 21ª o tempo volta a subir — essa subida é a degradação.
+
+> **Decisão para a Gold do modelo de pneu:** incluir `volta_corrida` e
+> `idade_pneu` como regressores **separados**, mais `volta_no_stint`. Sem o
+> proxy de combustível, a regressão atribui ao pneu um efeito que é do
+> tanque, e chega a inverter o sinal do coeficiente.
+>
+> Vale reconsiderar também o corte de volta limpa em 107% da mediana: ele
+> descarta justamente as voltas mais degradadas, que são o extremo do
+> fenômeno a modelar.

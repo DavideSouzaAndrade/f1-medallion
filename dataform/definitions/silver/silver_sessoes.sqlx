@@ -1,0 +1,108 @@
+config {
+  type: "table",
+  schema: "f1_silver",
+  name: "silver_sessoes",
+  tags: ["silver", "dimensao"],
+  description: "Dimensao de sessoes: uma linha por sessao, com o contexto do fim de semana desnormalizado de meetings.",
+  bigquery: { clusterBy: ["year", "session_key"] },
+  columns: {
+    session_key: "Chave da sessao. Nao e monotonica no tempo -- nao serve de marca d'agua.",
+    session_type: "Practice, Qualifying ou Race.",
+    session_name: "Practice 1/2/3, Qualifying, Sprint Qualifying, Sprint, Race, Day 1/2/3.",
+    eh_corrida: "Sessao que vale para o modelo de degradacao: Race ou Sprint.",
+    eh_teste: "Dia de teste de pre-temporada (Day 1/2/3): carro e programa diferentes de um GP.",
+    ja_ocorreu: "A sessao ja terminou. Falso para as 50 sessoes futuras de 2026.",
+    tem_dado: "A sessao tem voltas registradas. Falso para futuras e canceladas.",
+    circuit_type: "Permanent, Temporary - Street ou Temporary - Road. Afeta degradacao.",
+    gmt_offset_minutos: "Fuso do circuito em minutos. Na origem vem como texto '03:00:00'.",
+    data_inicio_agendada: "Horario nominal. A telemetria comeca ate 1 h antes -- nao use como fronteira.",
+    duracao_agendada_min: "Minutos entre inicio e fim agendados."
+  },
+  assertions: {
+    uniqueKey: ["session_key"],
+    nonNull: ["session_key", "year", "session_type"]
+  }
+}
+
+WITH bruto AS (
+  SELECT
+    -- Deduplicacao: a API ja devolveu registros repetidos na mesma resposta
+    -- (medido em weather e position). Barato e protege contra recorrencia.
+    payload,
+    ROW_NUMBER() OVER (
+      PARTITION BY SAFE_CAST(JSON_VALUE(payload, '$.session_key') AS INT64)
+      ORDER BY _data_ingestao_bronze DESC
+    ) AS n
+  FROM ${ref("bronze_sessions")}
+),
+
+sessoes AS (
+  SELECT
+    SAFE_CAST(JSON_VALUE(payload, '$.session_key')  AS INT64)     AS session_key,
+    SAFE_CAST(JSON_VALUE(payload, '$.meeting_key')  AS INT64)     AS meeting_key,
+    JSON_VALUE(payload, '$.session_type')                         AS session_type,
+    JSON_VALUE(payload, '$.session_name')                         AS session_name,
+    SAFE_CAST(JSON_VALUE(payload, '$.date_start')   AS TIMESTAMP) AS data_inicio_agendada,
+    SAFE_CAST(JSON_VALUE(payload, '$.date_end')     AS TIMESTAMP) AS data_fim_agendada,
+    SAFE_CAST(JSON_VALUE(payload, '$.year')         AS INT64)     AS year,
+    SAFE_CAST(JSON_VALUE(payload, '$.is_cancelled') AS BOOL)      AS foi_cancelada,
+    SAFE_CAST(JSON_VALUE(payload, '$.circuit_key')  AS INT64)     AS circuit_key,
+    JSON_VALUE(payload, '$.circuit_short_name')                   AS circuito,
+    JSON_VALUE(payload, '$.location')                             AS local,
+    JSON_VALUE(payload, '$.country_name')                         AS pais,
+    JSON_VALUE(payload, '$.country_code')                         AS pais_codigo,
+    JSON_VALUE(payload, '$.gmt_offset')                           AS gmt_offset_txt
+  FROM bruto WHERE n = 1
+),
+
+-- meetings acrescenta o que so existe no nivel do fim de semana
+encontros AS (
+  SELECT
+    SAFE_CAST(JSON_VALUE(payload, '$.meeting_key') AS INT64) AS meeting_key,
+    ANY_VALUE(JSON_VALUE(payload, '$.meeting_name'))          AS nome_evento,
+    ANY_VALUE(JSON_VALUE(payload, '$.meeting_official_name')) AS nome_oficial,
+    ANY_VALUE(JSON_VALUE(payload, '$.circuit_type'))          AS circuit_type
+  FROM ${ref("bronze_meetings")}
+  GROUP BY meeting_key
+),
+
+-- Quais sessoes tem volta registrada. Distingue "sem dado" de "nao ocorreu".
+com_dado AS (
+  SELECT DISTINCT session_key FROM ${ref("bronze_laps")}
+)
+
+SELECT
+  s.session_key,
+  s.meeting_key,
+  s.year,
+  s.session_type,
+  s.session_name,
+  e.nome_evento,
+  e.nome_oficial,
+
+  s.circuit_key,
+  s.circuito,
+  e.circuit_type,
+  s.local,
+  s.pais,
+  s.pais_codigo,
+
+  -- '03:00:00' -> 180. Facilita converter para hora local sem parsear texto.
+  SAFE_CAST(SPLIT(s.gmt_offset_txt, ':')[SAFE_OFFSET(0)] AS INT64) * 60
+    + SAFE_CAST(SPLIT(s.gmt_offset_txt, ':')[SAFE_OFFSET(1)] AS INT64) AS gmt_offset_minutos,
+
+  s.data_inicio_agendada,
+  s.data_fim_agendada,
+  TIMESTAMP_DIFF(s.data_fim_agendada, s.data_inicio_agendada, MINUTE) AS duracao_agendada_min,
+
+  -- Classificacoes que a Gold usa para recortar
+  s.session_name IN ('Race', 'Sprint')                    AS eh_corrida,
+  s.session_name IN ('Day 1', 'Day 2', 'Day 3')           AS eh_teste,
+  COALESCE(s.foi_cancelada, FALSE)                        AS foi_cancelada,
+  s.data_fim_agendada < CURRENT_TIMESTAMP()               AS ja_ocorreu,
+  d.session_key IS NOT NULL                               AS tem_dado,
+
+  CURRENT_TIMESTAMP() AS _data_processamento_silver
+FROM sessoes s
+LEFT JOIN encontros e ON e.meeting_key = s.meeting_key
+LEFT JOIN com_dado  d ON d.session_key = s.session_key
