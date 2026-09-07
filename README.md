@@ -85,10 +85,15 @@ cerca de uma hora e já liberam todo o trabalho do modelo de pneu.
 | Onda | Conteúdo | Duração aprox. | Necessária para |
 |------|----------|----------------|-----------------|
 | 1 | meetings, sessions, drivers | minutos | tudo |
-| 2 | laps, stints, pit, weather, position, race_control | ~1 h | modelo de pneu |
+| 2 | laps, stints, pit, weather, position, race_control, session_result, intervals | ~1 h | modelo de pneu |
 | 3 | car_data das corridas | ~4 h | modelo de piloto |
 | 4 | car_data de treinos e classificação | ~8 h | volume adicional |
 | 5 | location | ~8 h | opcional |
+| 6 | starting_grid, team_radio, overtakes, championship_drivers, championship_teams | ~30 min | contexto |
+
+As seis ondas cobrem os 18 endpoints publicados pela OpenF1. `intervals`
+entra na onda 2 porque o gap ao carro da frente é preditor direto de
+degradação de pneu — andar em ar sujo destrói composto mais rápido.
 
 ```bash
 gcloud run jobs execute f1-ingestao --region=us-central1 --args="--wave,1"
@@ -124,8 +129,23 @@ de corte segura caso o prazo aperte.
 
 Tier gratuito da OpenF1: 3 requisições por segundo e 30 por minuto. O cliente
 usa 25/min com intervalo mínimo de 0,5 s entre chamadas, e faz retry com
-backoff exponencial em 429 e 5xx. Respostas grandes demais são quebradas
-recursivamente em janelas de tempo menores.
+backoff exponencial em 429 e 5xx.
+
+Os demais códigos têm significados distintos e são tratados como tais:
+
+| Código | Significado | Tratamento |
+|--------|-------------|------------|
+| 404 | `No results found` — combinação válida, sem dado | resultado vazio; grava arquivo de zero linhas e entra no checkpoint |
+| 422 | resposta grande demais (teto medido ~250 mil registros / ~40 MB) | quebra recursiva por janela de tempo |
+| 401 | sessão de F1 ao vivo bloqueia o acesso global sem autenticação | aborta; aguardar o fim da sessão |
+
+Tratar 404 como falha seria um erro caro: a combinação nunca entraria no
+checkpoint e voltaria a ser consultada em toda execução, indefinidamente.
+
+A janela usada na quebra recebe folga de 2 h antes e 1 h depois do horário
+agendado da sessão. O `date_start` de `/sessions` é o horário nominal, mas a
+telemetria começa bem antes — em Bahrein 2024, 36% das amostras de `car_data`
+estão antes dele. Sem a folga, toda quebra descartaria esse terço em silêncio.
 
 ---
 

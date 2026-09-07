@@ -4,6 +4,11 @@ Executa uma "onda" por vez, em ordem de prioridade. A ingestao e
 idempotente: arquivos ja existentes sao pulados, entao rodar o mesmo
 comando duas vezes nao duplica dado e permite retomar apos falha.
 
+Resultado vazio conta como sucesso e gera arquivo de zero linhas. E o que
+mantem a idempotencia honesta: uma combinacao sem dado -- piloto que nao
+rodou, endpoint que so existe em corrida -- fica registrada e nao volta a
+ser consultada.
+
 Exemplos:
     python main.py --wave 1
     python main.py --wave 2 --years 2024 2025
@@ -14,7 +19,6 @@ Exemplos:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 import time
@@ -23,10 +27,30 @@ from datetime import datetime, timezone
 from typing import Any
 
 import config
-from openf1_client import OpenF1Client, OpenF1Error
-from storage import GCSStorage, LocalStorage, Storage, manifest_path, object_path
+from openf1_client import AccessBlocked, OpenF1Client, OpenF1Error
+from storage import (
+    GCSStorage,
+    LocalStorage,
+    ManifestWriter,
+    Storage,
+    manifest_prefix,
+    object_path,
+)
 
 log = logging.getLogger("ingestao")
+
+
+def _sessoes_do_endpoint(sessions: list[dict[str, Any]], endpoint: dict) -> list[dict[str, Any]]:
+    """Aplica o filtro de corrida declarado no proprio endpoint.
+
+    Vem por cima do filtro da onda. Evita gastar uma requisicao por sessao
+    em endpoints que a API so publica em corrida.
+    """
+    if endpoint.get("only_races"):
+        return [s for s in sessions if s.get("session_name") in config.RACE_SESSION_NAMES]
+    if endpoint.get("skip_races"):
+        return [s for s in sessions if s.get("session_name") not in config.RACE_SESSION_NAMES]
+    return sessions
 
 
 class Ingestor:
@@ -34,8 +58,8 @@ class Ingestor:
         self.client = client
         self.storage = storage
         self.prefix = prefix
-        self.manifest = manifest_path(prefix, run_id)
-        self.stats = {"gravados": 0, "pulados": 0, "falhas": 0, "linhas": 0, "bytes": 0}
+        self.manifest = ManifestWriter(storage, prefix, run_id)
+        self.stats = {"gravados": 0, "vazios": 0, "pulados": 0, "falhas": 0, "linhas": 0, "bytes": 0}
 
     # -- unidade de trabalho ----------------------------------------------
 
@@ -67,15 +91,23 @@ class Ingestor:
 
         size = self.storage.write_records(path, records)
 
-        self.stats["gravados"] += 1
-        self.stats["linhas"] += len(records)
-        self.stats["bytes"] += size
+        # Arquivo vazio ainda e checkpoint: a combinacao foi consultada e
+        # nao tem dado. Nao conta como gravacao util nem como falha.
+        if records:
+            self.stats["gravados"] += 1
+            self.stats["linhas"] += len(records)
+            self.stats["bytes"] += size
+            log.info(
+                "%s -> %s linhas, %.1f KB, %.1fs",
+                path, f"{len(records):,}".replace(",", "."), size / 1024, time.monotonic() - started,
+            )
+            status = "ok"
+        else:
+            self.stats["vazios"] += 1
+            log.info("%s -> sem registros", path)
+            status = "vazio"
 
-        log.info(
-            "%s -> %s linhas, %.1f KB, %.1fs",
-            path, f"{len(records):,}".replace(",", "."), size / 1024, time.monotonic() - started,
-        )
-        self._log_manifest(endpoint, path, session_key, driver_number, len(records), size, "ok", None)
+        self._log_manifest(endpoint, path, session_key, driver_number, len(records), size, status, None)
 
     def _log_manifest(
         self,
@@ -88,7 +120,7 @@ class Ingestor:
         status: str,
         error: str | None,
     ) -> None:
-        entry = {
+        self.manifest.add({
             "ingested_at": datetime.now(timezone.utc).isoformat(),
             "endpoint": endpoint,
             "object_path": path,
@@ -98,11 +130,7 @@ class Ingestor:
             "byte_size": size,
             "status": status,
             "error": error,
-        }
-        try:
-            self.storage.append_line(self.manifest, json.dumps(entry, ensure_ascii=False))
-        except Exception as exc:  # manifesto nao pode derrubar a ingestao
-            log.warning("nao foi possivel gravar no manifesto: %s", exc)
+        })
 
     # -- onda ---------------------------------------------------------------
 
@@ -113,12 +141,12 @@ class Ingestor:
         for year in years:
             log.info("--- ano %d ---", year)
             sessions = self.client.sessions(year)
+            if not sessions:
+                log.warning("nenhuma sessao encontrada para %d", year)
+                continue
             sessions.sort(key=lambda s: s.get("date_start") or "")
 
-            if spec.get("only_races"):
-                sessions = [s for s in sessions if s.get("session_name") in config.RACE_SESSION_NAMES]
-            elif spec.get("skip_races"):
-                sessions = [s for s in sessions if s.get("session_name") not in config.RACE_SESSION_NAMES]
+            sessions = _sessoes_do_endpoint(sessions, spec)
 
             if limit_sessions:
                 sessions = sessions[:limit_sessions]
@@ -130,11 +158,13 @@ class Ingestor:
                     self.ingest_one(name, year, {"year": year})
                     continue
 
-                for index, session in enumerate(sessions, start=1):
+                alvo = _sessoes_do_endpoint(sessions, endpoint)
+
+                for index, session in enumerate(alvo, start=1):
                     session_key = session["session_key"]
                     log.info(
                         "[%s] sessao %d/%d - %s / %s",
-                        name, index, len(sessions),
+                        name, index, len(alvo),
                         session.get("location"), session.get("session_name"),
                     )
 
@@ -142,7 +172,6 @@ class Ingestor:
                         self.ingest_one(name, year, {"session_key": session_key}, session_key)
                     elif scope == "session_driver":
                         self._ingest_by_driver(name, year, session)
-
 
     def _ingest_by_driver(self, endpoint: str, year: int, session: dict[str, Any]) -> None:
         """Telemetria: uma requisicao por piloto, com janela de tempo de reserva."""
@@ -155,6 +184,9 @@ class Ingestor:
             return
 
         numbers = sorted({d["driver_number"] for d in drivers if d.get("driver_number")})
+        if not numbers:
+            log.info("sessao %s nao lista pilotos", session_key)
+            return
 
         for number in numbers:
             self.ingest_one(
@@ -195,6 +227,7 @@ def main() -> None:
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
     log.info("run_id=%s", run_id)
+    log.info("manifesto em %s/", manifest_prefix(config.GCS_PREFIX, run_id))
 
     ingestor = Ingestor(OpenF1Client(), build_storage(args.local), config.GCS_PREFIX, run_id)
 
@@ -203,12 +236,15 @@ def main() -> None:
         ingestor.run_wave(args.wave, args.years, args.limit_sessions)
     except KeyboardInterrupt:
         log.warning("interrompido pelo usuario")
+    except AccessBlocked as exc:
+        log.error("%s", exc)
     finally:
+        ingestor.manifest.flush()
         elapsed = time.monotonic() - started
         s = ingestor.stats
         log.info(
-            "fim em %.1f min | gravados=%d pulados=%d falhas=%d | %s linhas | %.1f MB",
-            elapsed / 60, s["gravados"], s["pulados"], s["falhas"],
+            "fim em %.1f min | gravados=%d vazios=%d pulados=%d falhas=%d | %s linhas | %.1f MB",
+            elapsed / 60, s["gravados"], s["vazios"], s["pulados"], s["falhas"],
             f"{s['linhas']:,}".replace(",", "."), s["bytes"] / 1024 / 1024,
         )
 
