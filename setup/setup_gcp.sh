@@ -61,6 +61,21 @@ if ! gcloud iam service-accounts describe "${SA_EMAIL}" &>/dev/null; then
     --display-name="Pipeline F1 Medallion"
 fi
 
+# A criacao da service account e assincrona no IAM. Sem esperar a
+# propagacao, o add-iam-policy-binding abaixo falha com
+# INVALID_ARGUMENT: "Service account ... does not exist".
+echo ">> aguardando propagacao da service account"
+for _ in $(seq 1 30); do
+  if gcloud iam service-accounts describe "${SA_EMAIL}" &>/dev/null; then
+    break
+  fi
+  sleep 2
+done
+if ! gcloud iam service-accounts describe "${SA_EMAIL}" &>/dev/null; then
+  echo "ERRO: a service account ${SA_EMAIL} nao propagou em 60s." >&2
+  exit 1
+fi
+
 for role in roles/storage.objectAdmin roles/bigquery.dataEditor roles/bigquery.jobUser; do
   gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${SA_EMAIL}" \
