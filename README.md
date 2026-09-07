@@ -51,8 +51,11 @@ caracteriza a arquitetura funcionando corretamente.
 ├── setup/
 │   └── setup_gcp.sh    provisiona bucket, datasets, SA e Cloud Run Job
 ├── dataform/           definições SQL orquestradas (bronze → silver → gold → ml)
-├── sql/                cópia plana dos .sql para leitura
-└── docs/               apresentação e diagramas
+│   ├── includes/           catálogo dos endpoints
+│   └── definitions/bronze/ tabelas externas + camada Bronze incremental
+└── docs/
+    ├── ingestao-incremental.md   como o pipeline se atualiza sem varrer tudo
+    └── perfil-dados-bronze.md    campo a campo dos 18 endpoints + plano da Silver
 ```
 
 ---
