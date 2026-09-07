@@ -1,0 +1,54 @@
+config {
+  type: "operations",
+  schema: "f1_gold",
+  name: "modelo_degradacao_pneu",
+  tags: ["ml", "modelo_pneu"],
+  hasOutput: false,
+  dependencies: ["gold_degradacao_pneu"],
+  description: "Modelo 1: regressao linear do tempo de volta. Mede quanto a idade do pneu custa em segundos, separando esse efeito do combustivel."
+}
+
+-- Regressao linear, e nao boosted tree, de proposito: o objetivo aqui e
+-- interpretar o coeficiente da idade do pneu, nao maximizar acuracia. Um
+-- modelo linear entrega "cada volta de pneu custa X segundos" diretamente.
+--
+-- volta_corrida entra junto com idade_pneu porque a analise exploratoria
+-- mostrou que o efeito do combustivel e maior que o da degradacao e tem
+-- sinal contrario. Sem ele o coeficiente do pneu sai invertido.
+--
+-- circuito entra como categorica porque o tempo absoluto de volta varia de
+-- ~72 s em Monaco a ~105 s em Spa. Sem esse controle a variancia entre
+-- circuitos domina tudo.
+
+CREATE OR REPLACE MODEL `pdm-davi-2026.f1_gold.modelo_degradacao_pneu`
+OPTIONS (
+  model_type = 'LINEAR_REG',
+  input_label_cols = ['alvo_duracao_s'],
+  data_split_method = 'AUTO_SPLIT',
+  enable_global_explain = TRUE,
+  l2_reg = 0.1
+) AS
+SELECT
+  alvo_duracao_s,
+
+  -- Regressores do pneu
+  idade_pneu,
+  volta_no_stint,
+  composto,
+
+  -- Proxy de combustivel
+  volta_corrida,
+
+  -- Trafego
+  IFNULL(gap_medio_a_frente, 99.0) AS gap_medio_a_frente,
+
+  -- Condicoes
+  temp_pista,
+  temp_ar,
+  umidade,
+
+  -- Controle de circuito
+  circuito,
+  circuit_type
+FROM ${ref("gold_degradacao_pneu")}
+WHERE temp_pista IS NOT NULL
