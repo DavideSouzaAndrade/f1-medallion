@@ -16,6 +16,7 @@ import io
 import json
 import logging
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,10 @@ class Storage(ABC):
     @abstractmethod
     def write_text(self, path: str, text: str) -> None: ...
 
+    @abstractmethod
+    def read_text(self, path: str) -> str | None:
+        """Conteudo do objeto, ou None se ele nao existir."""
+
     def write_records(self, path: str, records: list[dict[str, Any]]) -> int:
         payload = to_ndjson_gz(records)
         self.write_bytes(path, payload)
@@ -72,6 +77,12 @@ class GCSStorage(Storage):
     def write_text(self, path: str, text: str) -> None:
         self.bucket.blob(path).upload_from_string(text, content_type="application/x-ndjson")
 
+    def read_text(self, path: str) -> str | None:
+        blob = self.bucket.blob(path)
+        if not blob.exists(self.client):
+            return None
+        return blob.download_as_text()
+
 
 class LocalStorage(Storage):
     def __init__(self, root: str) -> None:
@@ -92,6 +103,58 @@ class LocalStorage(Storage):
         full = self._full(path)
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(text, encoding="utf-8")
+
+    def read_text(self, path: str) -> str | None:
+        full = self._full(path)
+        if not full.exists():
+            return None
+        return full.read_text(encoding="utf-8")
+
+
+class StateStore:
+    """Guarda a marca d'agua da ingestao incremental.
+
+    A marca d'agua e um marcador de pagina: uma data dizendo "ja cuidei de
+    toda sessao que terminou antes disto". Guardada por onda, porque as
+    ondas avancam de forma independente -- voce pode estar em dia na onda 2
+    e atrasado na 3.
+
+    O arquivo em _state/watermark.json:
+
+        {
+          "atualizado_em": "2026-09-15T06:00:00+00:00",
+          "ondas": {"2": {"ate": "2026-09-13T15:00:00+00:00"}}
+        }
+
+    Sem esse marcador, descobrir o que e novo exige perguntar ao bucket
+    sobre cada objeto de cada sessao de cada temporada. Com ele, basta uma
+    requisicao a /sessions e um filtro por data.
+    """
+
+    def __init__(self, storage: Storage, prefix: str) -> None:
+        self.storage = storage
+        self.path = state_path(prefix)
+
+    def _ler(self) -> dict[str, Any]:
+        bruto = self.storage.read_text(self.path)
+        if not bruto:
+            return {}
+        try:
+            return json.loads(bruto)
+        except json.JSONDecodeError:
+            log.warning("estado em %s ilegivel; tratando como vazio", self.path)
+            return {}
+
+    def marca(self, wave: int) -> str | None:
+        """Data ate a qual esta onda ja foi ingerida, ou None na primeira vez."""
+        return self._ler().get("ondas", {}).get(str(wave), {}).get("ate")
+
+    def avancar(self, wave: int, ate: str) -> None:
+        estado = self._ler()
+        estado.setdefault("ondas", {})[str(wave)] = {"ate": ate}
+        estado["atualizado_em"] = datetime.now(timezone.utc).isoformat()
+        self.storage.write_text(self.path, json.dumps(estado, indent=2, ensure_ascii=False))
+        log.info("marca d'agua da onda %d avancou para %s", wave, ate)
 
 
 class ManifestWriter:
@@ -158,3 +221,7 @@ def object_path(
 
 def manifest_prefix(prefix: str, run_id: str) -> str:
     return f"{prefix}/_manifest/run_id={run_id}"
+
+
+def state_path(prefix: str) -> str:
+    return f"{prefix}/_state/watermark.json"

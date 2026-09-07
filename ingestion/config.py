@@ -27,6 +27,16 @@ YEARS = [int(y) for y in os.environ.get("YEARS", "2023,2024,2025,2026").split(",
 # pular endpoints que a API so publica em corrida.
 RACE_SESSION_NAMES = {"Race", "Sprint"}
 
+# --- atualizacao incremental -----------------------------------------------
+
+# Quanto esperar depois do fim de uma sessao antes de ingeri-la.
+#
+# A OpenF1 continua completando os dados por um tempo depois que a sessao
+# acaba. Ingerir cedo demais grava dado pela metade -- e como o checkpoint
+# e a existencia do objeto, esse arquivo incompleto nunca mais seria
+# rebuscado. A carencia troca algumas horas de atraso por essa garantia.
+GRACE_HOURS = int(os.environ.get("GRACE_HOURS", "24"))
+
 
 # --- ondas de ingestao -----------------------------------------------------
 #

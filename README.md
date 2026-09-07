@@ -103,6 +103,22 @@ gcloud run jobs execute f1-ingestao --region=us-central1 --args="--wave,2"
 A ingestão é **idempotente**: o checkpoint é a existência do objeto no GCS.
 Rodar o mesmo comando duas vezes não duplica dado e retoma de onde parou.
 
+### 4. Atualizar com as corridas novas
+
+O backfill acima varre todas as sessões de todas as temporadas. Para a
+rotina semanal existe o modo incremental, que usa uma marca d'água para
+considerar apenas o que terminou depois da última execução:
+
+```bash
+python main.py --wave 2 --incremental
+```
+
+Uma requisição a `/sessions` por ano resolve a descoberta; temporada antiga
+nem chega a ser consultada. Sessões que terminaram há menos de 24 h ficam
+para a execução seguinte, porque a OpenF1 ainda está completando os dados.
+
+Detalhes em [docs/ingestao-incremental.md](docs/ingestao-incremental.md).
+
 ---
 
 ## Decisões de projeto
