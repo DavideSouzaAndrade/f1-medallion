@@ -1,0 +1,266 @@
+config {
+  type: "table",
+  schema: "f1_silver",
+  name: "silver_voltas",
+  tags: ["silver", "fato"],
+  description: "Fato de voltas: uma linha por (sessao, piloto, volta), com o contexto de pneu, box, clima e trafego ja resolvido. Nao filtra nada -- expoe colunas de diagnostico para a Gold decidir.",
+  bigquery: {
+    partitionBy: "DATE(data_inicio)",
+    clusterBy: ["session_key", "driver_number"]
+  },
+  columns: {
+    idade_pneu: "Voltas rodadas com o jogo de pneu ao FINAL desta volta. tyre_age_at_start + (volta - lap_start) + 1. E o regressor central do modelo de degradacao.",
+    eh_saida_box: "Vem da flag is_pit_out_lap do endpoint laps.",
+    eh_entrada_box: "Derivada do endpoint pit -- nao existe flag equivalente na origem.",
+    razao_mediana_sessao: "lap_duration dividido pela mediana da sessao. 1,07 e o corte usual de volta limpa.",
+    volta_limpa: "Diagnostico consolidado: tem tempo, nao passou pelo box, e esta dentro de 107% da mediana.",
+    gap_medio_a_frente: "Media do gap ao carro da frente durante a volta. Proxy de ar sujo, que acelera a degradacao.",
+    stint_valido: "Falso para stints fantasma (composto UNKNOWN ou nulo) -- a API emite um registro vazio para quem nao participou.",
+    stint_ambiguo: "Verdadeiro quando a volta casou com mais de um stint alem da volta de fronteira do pit stop. Sao 29 pares em 2026, com sobreposicao de ate 8 voltas: inconsistencia da origem, nao convencao. A atribuicao de pneu nessas voltas e incerta."
+  },
+  assertions: {
+    uniqueKey: ["session_key", "driver_number", "lap_number"],
+    nonNull: ["session_key", "driver_number", "lap_number"]
+  }
+}
+
+WITH voltas_bruto AS (
+  SELECT
+    session_key,
+    SAFE_CAST(JSON_VALUE(payload,'$.driver_number')     AS INT64)     AS driver_number,
+    SAFE_CAST(JSON_VALUE(payload,'$.lap_number')        AS INT64)     AS lap_number,
+    SAFE_CAST(JSON_VALUE(payload,'$.date_start')        AS TIMESTAMP) AS data_inicio,
+    SAFE_CAST(JSON_VALUE(payload,'$.lap_duration')      AS FLOAT64)   AS duracao_s,
+    SAFE_CAST(JSON_VALUE(payload,'$.duration_sector_1') AS FLOAT64)   AS setor_1_s,
+    SAFE_CAST(JSON_VALUE(payload,'$.duration_sector_2') AS FLOAT64)   AS setor_2_s,
+    SAFE_CAST(JSON_VALUE(payload,'$.duration_sector_3') AS FLOAT64)   AS setor_3_s,
+    SAFE_CAST(JSON_VALUE(payload,'$.i1_speed')          AS INT64)     AS vel_i1,
+    SAFE_CAST(JSON_VALUE(payload,'$.i2_speed')          AS INT64)     AS vel_i2,
+    SAFE_CAST(JSON_VALUE(payload,'$.st_speed')          AS INT64)     AS vel_reta,
+    SAFE_CAST(JSON_VALUE(payload,'$.is_pit_out_lap')    AS BOOL)      AS eh_saida_box,
+    ROW_NUMBER() OVER (
+      PARTITION BY session_key,
+                   SAFE_CAST(JSON_VALUE(payload,'$.driver_number') AS INT64),
+                   SAFE_CAST(JSON_VALUE(payload,'$.lap_number')    AS INT64)
+      ORDER BY _data_ingestao_bronze DESC
+    ) AS n
+  FROM ${ref("bronze_laps")}
+),
+
+-- A janela da volta. A ultima volta de cada piloto NAO fica aberta: seria
+-- absorver o retorno ao box apos a bandeirada, medido a 29 km/h de media.
+janelas AS (
+  SELECT
+    * EXCEPT(n),
+    COALESCE(
+      LEAD(data_inicio) OVER (PARTITION BY session_key, driver_number ORDER BY lap_number),
+      TIMESTAMP_ADD(data_inicio, INTERVAL CAST(COALESCE(duracao_s, 0) * 1000 AS INT64) MILLISECOND)
+    ) AS data_fim
+  FROM voltas_bruto WHERE n = 1
+),
+
+stints AS (
+  SELECT
+    session_key,
+    SAFE_CAST(JSON_VALUE(payload,'$.driver_number')     AS INT64) AS driver_number,
+    SAFE_CAST(JSON_VALUE(payload,'$.stint_number')      AS INT64) AS stint_number,
+    SAFE_CAST(JSON_VALUE(payload,'$.lap_start')         AS INT64) AS lap_start,
+    SAFE_CAST(JSON_VALUE(payload,'$.lap_end')           AS INT64) AS lap_end,
+    JSON_VALUE(payload,'$.compound')                              AS composto,
+    SAFE_CAST(JSON_VALUE(payload,'$.tyre_age_at_start') AS INT64) AS idade_pneu_inicio
+  FROM ${ref("bronze_stints")}
+),
+
+-- Uma volta pode casar com mais de um stint, e isso duplicaria a linha.
+--
+-- Na origem, o lap_end de um stint e igual ao lap_start do seguinte: a volta
+-- do pit stop pertence aos dois, porque o piloto a roda com o pneu velho e
+-- sai do box com o novo. Medido em toda a base: 14.030 voltas nessa
+-- situacao, e em 2023-2025 a sobreposicao e SEMPRE de exatamente 1 volta,
+-- a de fronteira.
+--
+-- A excecao esta em 2026: 29 pares se sobrepoem em ate 8 voltas, o que nao
+-- e convencao de fronteira e sim inconsistencia da origem. Esses casos ficam
+-- marcados em stint_ambiguo em vez de escolhidos em silencio.
+--
+-- Criterio de desempate: descarta o stint fantasma (composto UNKNOWN, que a
+-- API emite para quem nao participou) e fica com o stint_number maior, ou
+-- seja, o pneu mais recente. Para o modelo de degradacao a escolha e
+-- indiferente, porque a Gold ja exclui voltas de entrada e saida de box --
+-- justamente as voltas de fronteira.
+stint_por_volta AS (
+  SELECT * EXCEPT(ordem) FROM (
+    SELECT
+      v.session_key,
+      v.driver_number,
+      v.lap_number,
+      st.stint_number,
+      st.composto,
+      st.lap_start,
+      st.idade_pneu_inicio,
+      COUNT(*) OVER (PARTITION BY v.session_key, v.driver_number, v.lap_number) > 1 AS houve_disputa,
+      -- Se em TODOS os stints concorrentes a volta cai numa extremidade, e a
+      -- convencao de fronteira do pit stop: o lap_end de um e o lap_start do
+      -- seguinte. Se em algum ela cai no meio da faixa, a sobreposicao e real.
+      LOGICAL_AND(v.lap_number = st.lap_start OR v.lap_number = st.lap_end)
+        OVER (PARTITION BY v.session_key, v.driver_number, v.lap_number) AS so_fronteira,
+      ROW_NUMBER() OVER (
+        PARTITION BY v.session_key, v.driver_number, v.lap_number
+        ORDER BY
+          -- 1. stint real antes de stint fantasma
+          IF(st.composto IS NULL OR st.composto = 'UNKNOWN', 1, 0),
+          -- 2. pneu mais recente
+          st.stint_number DESC
+      ) AS ordem
+    FROM janelas v
+    JOIN stints st
+      ON  st.session_key   = v.session_key
+      AND st.driver_number = v.driver_number
+      AND v.lap_number BETWEEN st.lap_start AND st.lap_end
+  )
+  WHERE ordem = 1
+),
+
+-- Volta em que o piloto ENTROU no box. O endpoint laps so traz a flag de saida.
+entradas_box AS (
+  SELECT DISTINCT
+    session_key,
+    SAFE_CAST(JSON_VALUE(payload,'$.driver_number') AS INT64) AS driver_number,
+    SAFE_CAST(JSON_VALUE(payload,'$.lap_number')    AS INT64) AS lap_number,
+    SAFE_CAST(JSON_VALUE(payload,'$.pit_duration')  AS FLOAT64) AS duracao_box_s
+  FROM ${ref("bronze_pit")}
+),
+
+-- Cada leitura de clima vale ate a proxima. Vira uma janela, o que troca
+-- uma subconsulta correlacionada (que o BigQuery recusa) por um join de
+-- intervalo com um unico casamento por volta.
+clima AS (
+  SELECT
+    session_key,
+    data AS clima_ini,
+    LEAD(data) OVER (PARTITION BY session_key ORDER BY data) AS clima_fim,
+    temp_ar, temp_pista, umidade, chuva, vento_kmh
+  FROM (SELECT
+    session_key,
+    SAFE_CAST(JSON_VALUE(payload,'$.date')              AS TIMESTAMP) AS data,
+    SAFE_CAST(JSON_VALUE(payload,'$.air_temperature')   AS FLOAT64)   AS temp_ar,
+    SAFE_CAST(JSON_VALUE(payload,'$.track_temperature') AS FLOAT64)   AS temp_pista,
+    SAFE_CAST(JSON_VALUE(payload,'$.humidity')          AS FLOAT64)   AS umidade,
+    SAFE_CAST(JSON_VALUE(payload,'$.rainfall')          AS INT64)     AS chuva,
+    SAFE_CAST(JSON_VALUE(payload,'$.wind_speed')        AS FLOAT64)   AS vento_kmh
+  FROM ${ref("bronze_weather")})
+),
+
+-- Gap ao carro da frente durante a volta: o proxy de ar sujo.
+-- gap_to_leader e interval misturam numero e texto (+N LAPS) em 10,4% dos
+-- casos, entao o parse e explicito.
+trafego AS (
+  SELECT
+    i.session_key,
+    SAFE_CAST(JSON_VALUE(i.payload,'$.driver_number') AS INT64)   AS driver_number,
+    SAFE_CAST(JSON_VALUE(i.payload,'$.date') AS TIMESTAMP)        AS data,
+    SAFE_CAST(JSON_VALUE(i.payload,'$.interval') AS FLOAT64)      AS gap_frente_s,
+    SAFE_CAST(JSON_VALUE(i.payload,'$.gap_to_leader') AS FLOAT64) AS gap_lider_s,
+    SAFE_CAST(REGEXP_EXTRACT(JSON_VALUE(i.payload,'$.gap_to_leader'), r'^\+(\d+) LAPS?$') AS INT64) AS voltas_atras
+  FROM ${ref("bronze_intervals")} i
+),
+
+-- Trafego agregado na janela de cada volta, por join em vez de subconsulta.
+trafego_por_volta AS (
+  SELECT
+    j.session_key, j.driver_number, j.lap_number,
+    ROUND(AVG(t.gap_frente_s), 3) AS gap_medio_a_frente,
+    ROUND(MIN(t.gap_frente_s), 3) AS gap_minimo_a_frente,
+    MAX(t.voltas_atras)           AS voltas_atras
+  FROM janelas j
+  JOIN trafego t
+    ON  t.session_key   = j.session_key
+    AND t.driver_number = j.driver_number
+    AND t.data >= j.data_inicio
+    AND t.data <  j.data_fim
+  GROUP BY 1, 2, 3
+),
+
+base AS (
+  SELECT
+    v.*,
+    st.stint_number,
+    st.composto,
+    st.lap_start,
+    st.idade_pneu_inicio,
+    -- Idade ao final da volta. +1 porque a propria volta conta.
+    st.idade_pneu_inicio + (v.lap_number - st.lap_start) + 1 AS idade_pneu,
+    st.composto IS NOT NULL AND st.composto NOT IN ('UNKNOWN') AS stint_valido,
+    -- Verdadeiro quando a volta casou com mais de um stint e a sobreposicao
+    -- foi alem da volta de fronteira: nesses casos a atribuicao de pneu e
+    -- incerta, e quem consome decide se confia.
+    COALESCE(st.houve_disputa AND NOT st.so_fronteira, FALSE) AS stint_ambiguo,
+    eb.lap_number IS NOT NULL AS eh_entrada_box,
+    eb.duracao_box_s,
+    -- Mediana da sessao para o corte de volta limpa
+    PERCENTILE_CONT(v.duracao_s, 0.5) OVER (PARTITION BY v.session_key) AS mediana_sessao_s,
+    MIN(v.duracao_s) OVER (PARTITION BY v.session_key) AS melhor_volta_sessao_s
+  FROM janelas v
+  LEFT JOIN stint_por_volta st
+    ON  st.session_key   = v.session_key
+   AND st.driver_number  = v.driver_number
+   AND st.lap_number     = v.lap_number
+  LEFT JOIN entradas_box eb
+    ON eb.session_key = v.session_key
+   AND eb.driver_number = v.driver_number
+   AND eb.lap_number = v.lap_number
+)
+
+SELECT
+  b.session_key,
+  b.driver_number,
+  b.lap_number,
+  b.data_inicio,
+  b.data_fim,
+
+  b.duracao_s,
+  b.setor_1_s, b.setor_2_s, b.setor_3_s,
+  b.vel_i1, b.vel_i2, b.vel_reta,
+
+  b.stint_number,
+  b.composto,
+  b.idade_pneu_inicio,
+  IF(b.stint_valido, b.idade_pneu, NULL) AS idade_pneu,
+  b.stint_valido,
+  b.stint_ambiguo,
+
+  COALESCE(b.eh_saida_box, FALSE) AS eh_saida_box,
+  b.eh_entrada_box,
+  b.duracao_box_s,
+
+  -- Trafego agregado na janela da volta
+  tv.gap_medio_a_frente,
+  tv.gap_minimo_a_frente,
+  tv.voltas_atras,
+
+  -- Clima vigente no inicio da volta
+  c.temp_ar,
+  c.temp_pista,
+  c.umidade,
+  c.chuva,
+  c.vento_kmh,
+
+  -- Diagnostico. A Silver nao filtra; so mede.
+  b.duracao_s IS NOT NULL                                    AS tem_tempo,
+  ROUND(SAFE_DIVIDE(b.duracao_s, b.mediana_sessao_s), 4)     AS razao_mediana_sessao,
+  ROUND(SAFE_DIVIDE(b.duracao_s, b.melhor_volta_sessao_s), 4) AS razao_melhor_sessao,
+  (b.duracao_s IS NOT NULL
+     AND NOT COALESCE(b.eh_saida_box, FALSE)
+     AND NOT b.eh_entrada_box
+     AND SAFE_DIVIDE(b.duracao_s, b.mediana_sessao_s) <= 1.07) AS volta_limpa,
+
+  CURRENT_TIMESTAMP() AS _data_processamento_silver
+FROM base b
+LEFT JOIN trafego_por_volta tv
+  ON  tv.session_key   = b.session_key
+  AND tv.driver_number = b.driver_number
+  AND tv.lap_number    = b.lap_number
+LEFT JOIN clima c
+  ON  c.session_key = b.session_key
+  AND b.data_inicio >= c.clima_ini
+  AND (c.clima_fim IS NULL OR b.data_inicio < c.clima_fim)

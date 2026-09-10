@@ -1,0 +1,60 @@
+config {
+  type: "operations",
+  schema: "f1_gold",
+  name: "modelo_assinatura_piloto",
+  tags: ["ml", "modelo_piloto"],
+  hasOutput: false,
+  dependencies: ["gold_assinatura_piloto"],
+  description: "Modelo 2: classificacao multiclasse do piloto a partir da assinatura de pilotagem de uma volta."
+}
+
+-- Cuidado central deste modelo: NAO incluir nada que identifique o piloto
+-- por outro caminho que nao o estilo de pilotagem.
+--
+-- Ficam de fora driver_number (e o proprio rotulo disfarcado), equipe (duas
+-- pessoas por equipe, entao reduz o problema a 14 opcoes) e nome_completo.
+-- Incluir qualquer um deles daria acuracia alta e resposta vazia.
+--
+-- circuito entra porque e contexto, nao identidade: todos os pilotos correm
+-- em todos os circuitos, entao ele nao vaza o rotulo -- so permite ao modelo
+-- comparar estilos dentro da mesma pista.
+
+CREATE OR REPLACE MODEL `pdm-davi-2026.f1_gold.modelo_assinatura_piloto`
+OPTIONS (
+  model_type = 'LOGISTIC_REG',
+  input_label_cols = ['rotulo_piloto'],
+  auto_class_weights = TRUE,
+  data_split_method = 'AUTO_SPLIT'
+) AS
+SELECT
+  rotulo_piloto,
+
+  -- Acelerador: quanto e com que suavidade
+  pct_acelerador_pleno,
+  pct_acelerador_solto,
+  acelerador_medio,
+  suavidade_acelerador,
+
+  -- Freio
+  pct_freando,
+
+  -- Caixa de marchas
+  trocas_marcha,
+  marcha_media,
+
+  -- Motor
+  rpm_medio,
+  rpm_maximo,
+
+  -- Velocidade
+  vel_media,
+  vel_maxima,
+  vel_desvio,
+
+  -- DRS
+  pct_drs_aberto,
+
+  -- Contexto, nao identidade
+  circuito
+FROM ${ref("gold_assinatura_piloto")}
+WHERE amostras_validas >= 200

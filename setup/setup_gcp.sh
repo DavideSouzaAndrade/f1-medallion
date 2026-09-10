@@ -45,10 +45,15 @@ else
 fi
 
 echo ">> datasets do BigQuery (uma camada por dataset)"
-for ds in bronze silver gold; do
+# Os nomes sao prefixados com f1_ de proposito. O projeto e compartilhado
+# com outras disciplinas, e "bronze", "silver" e "gold" sao genericos o
+# bastante para colidir -- se um dataset com esse nome ja existir, o teste
+# abaixo o adota em silencio e passariamos a escrever no dado alheio.
+for camada in bronze silver gold; do
+  ds="f1_${camada}"
   if ! bq --location="${BQ_LOCATION}" show --dataset "${PROJECT_ID}:${ds}" &>/dev/null; then
     bq --location="${BQ_LOCATION}" mk --dataset \
-      --description="Camada ${ds} da arquitetura medallion" \
+      --description="Camada ${camada} do pipeline F1 Medallion" \
       "${PROJECT_ID}:${ds}"
   else
     echo "   ${ds} ja existe"
@@ -59,6 +64,21 @@ echo ">> service account"
 if ! gcloud iam service-accounts describe "${SA_EMAIL}" &>/dev/null; then
   gcloud iam service-accounts create "${SA_NAME}" \
     --display-name="Pipeline F1 Medallion"
+fi
+
+# A criacao da service account e assincrona no IAM. Sem esperar a
+# propagacao, o add-iam-policy-binding abaixo falha com
+# INVALID_ARGUMENT: "Service account ... does not exist".
+echo ">> aguardando propagacao da service account"
+for _ in $(seq 1 30); do
+  if gcloud iam service-accounts describe "${SA_EMAIL}" &>/dev/null; then
+    break
+  fi
+  sleep 2
+done
+if ! gcloud iam service-accounts describe "${SA_EMAIL}" &>/dev/null; then
+  echo "ERRO: a service account ${SA_EMAIL} nao propagou em 60s." >&2
+  exit 1
 fi
 
 for role in roles/storage.objectAdmin roles/bigquery.dataEditor roles/bigquery.jobUser; do

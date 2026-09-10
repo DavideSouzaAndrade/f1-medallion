@@ -1,0 +1,83 @@
+config {
+  type: "table",
+  schema: "f1_silver",
+  name: "silver_telemetria",
+  tags: ["silver", "fato"],
+  description: "Fato de telemetria a ~3,7 Hz, tipado, com a volta e o stint resolvidos por as-of join. Nao descarta linha: campos invalidos viram NULL e o diagnostico fica em colunas proprias.",
+  bigquery: {
+    partitionBy: "DATE(data)",
+    clusterBy: ["session_key", "driver_number"],
+    requirePartitionFilter: false
+  },
+  columns: {
+    throttle: "0 a 100. NULL quando a origem trouxe o sentinela 104.",
+    brake: "0 ou 100. NULL quando a origem trouxe o sentinela 104.",
+    n_gear: "0 a 8. NULL fora dessa faixa -- a origem chega a trazer 75.",
+    drs_codigo: "Codigo cru de estado do DRS. NULL em 23% das amostras.",
+    drs_aberto: "Verdadeiro para os codigos 10, 12 e 14. NULL preservado como NULL, nunca convertido para falso.",
+    telemetria_sentinela: "A origem trouxe throttle=104 e brake=104 simultaneamente. Em 99,75% dos casos o carro nao esta em pista, mas em 0,25% ha telemetria real -- por isso a linha e mantida.",
+    em_pista: "O carro esta se movendo ou com motor ligado.",
+    lap_number: "Volta resolvida por as-of join. NULL antes da primeira volta cronometrada (36% das amostras, o carro no box)."
+  }
+}
+
+WITH bruto AS (
+  SELECT
+    session_key, driver_number, year,
+    SAFE_CAST(JSON_VALUE(payload,'$.date')     AS TIMESTAMP) AS data,
+    SAFE_CAST(JSON_VALUE(payload,'$.speed')    AS INT64)     AS speed,
+    SAFE_CAST(JSON_VALUE(payload,'$.rpm')      AS INT64)     AS rpm,
+    SAFE_CAST(JSON_VALUE(payload,'$.n_gear')   AS INT64)     AS n_gear_bruto,
+    SAFE_CAST(JSON_VALUE(payload,'$.throttle') AS INT64)     AS throttle_bruto,
+    SAFE_CAST(JSON_VALUE(payload,'$.brake')    AS INT64)     AS brake_bruto,
+    SAFE_CAST(JSON_VALUE(payload,'$.drs')      AS INT64)     AS drs_codigo
+  FROM ${ref("bronze_car_data")}
+),
+
+-- Janela de cada volta, vinda da Silver de voltas: o as-of join da telemetria
+-- reaproveita exatamente as mesmas fronteiras, entao as duas tabelas contam a
+-- mesma historia.
+janelas AS (
+  SELECT session_key, driver_number, lap_number, stint_number, composto,
+         idade_pneu, data_inicio, data_fim
+  FROM ${ref("silver_voltas")}
+)
+
+SELECT
+  b.session_key,
+  b.driver_number,
+  b.year,
+  b.data,
+
+  b.speed,
+  b.rpm,
+
+  -- O valor 104 e sentinela de "sem telemetria", nao leitura. Ele invalida
+  -- throttle e brake, e NAO a linha: em 0,25% dos casos o carro esta em pista
+  -- a ~186 km/h e so esses dois campos vieram corrompidos.
+  IF(b.throttle_bruto BETWEEN 0 AND 100, b.throttle_bruto, NULL) AS throttle,
+  IF(b.brake_bruto IN (0, 100),          b.brake_bruto,    NULL) AS brake,
+
+  -- Um F1 tem 8 marchas. A origem chega a trazer 75.
+  IF(b.n_gear_bruto BETWEEN 0 AND 8, b.n_gear_bruto, NULL) AS n_gear,
+
+  b.drs_codigo,
+  -- Codigo de estado, nao booleano. 10, 12 e 14 sao DRS aberto -- confirmado
+  -- pela evidencia: aparecem a 250-288 km/h com acelerador em 99%.
+  IF(b.drs_codigo IS NULL, NULL, b.drs_codigo IN (10, 12, 14)) AS drs_aberto,
+
+  (b.throttle_bruto = 104 AND b.brake_bruto = 104)  AS telemetria_sentinela,
+  (b.speed > 0 OR b.rpm > 0)                        AS em_pista,
+
+  j.lap_number,
+  j.stint_number,
+  j.composto,
+  j.idade_pneu,
+
+  CURRENT_TIMESTAMP() AS _data_processamento_silver
+FROM bruto b
+LEFT JOIN janelas j
+  ON  j.session_key   = b.session_key
+  AND j.driver_number = b.driver_number
+  AND b.data >= j.data_inicio
+  AND b.data <  j.data_fim

@@ -1,0 +1,83 @@
+config {
+  type: "table",
+  schema: "f1_silver",
+  name: "silver_pilotos",
+  tags: ["silver", "dimensao"],
+  description: "Dimensao de pilotos no grao (sessao, piloto). O grao e esse, e nao o piloto isolado, porque numero e equipe mudam entre temporadas: sao 41 numeros distintos para 37 pilotos.",
+  bigquery: { clusterBy: ["session_key", "driver_number"] },
+  columns: {
+    driver_number: "Numero do carro. Nao identifica o piloto sozinho -- muda entre temporadas.",
+    nome_completo: "Pode ser NULL: alguns pilotos aparecem em fatos sem constar no endpoint drivers.",
+    eh_piloto_teste: "Numero acima de 100, usado em teste de pre-temporada.",
+    consta_em_drivers: "O endpoint drivers listou este piloto nesta sessao. Falso para 67 casos observados."
+  },
+  assertions: {
+    uniqueKey: ["session_key", "driver_number"],
+    nonNull: ["session_key", "driver_number"]
+  }
+}
+
+-- A dimensao e construida a partir da UNIAO dos numeros observados em todas
+-- as fontes, nao apenas do endpoint drivers.
+--
+-- Motivo medido na analise exploratoria: 67 registros de fatos referenciam
+-- pilotos que o endpoint drivers nao lista naquela sessao. Sao dois casos --
+-- pilotos de teste com numero de tres digitos (241, 242, 243, 247) em dias de
+-- pre-temporada, e tres sessoes de Spielberg 2025 em que o endpoint
+-- simplesmente veio incompleto. Construir a dimensao so a partir de drivers
+-- faria esses fatos ficarem orfaos.
+
+WITH observados AS (
+  SELECT session_key, SAFE_CAST(JSON_VALUE(payload,'$.driver_number') AS INT64) drv FROM ${ref("bronze_drivers")}
+  UNION DISTINCT
+  SELECT session_key, SAFE_CAST(JSON_VALUE(payload,'$.driver_number') AS INT64) FROM ${ref("bronze_laps")}
+  UNION DISTINCT
+  SELECT session_key, SAFE_CAST(JSON_VALUE(payload,'$.driver_number') AS INT64) FROM ${ref("bronze_stints")}
+  UNION DISTINCT
+  SELECT session_key, SAFE_CAST(JSON_VALUE(payload,'$.driver_number') AS INT64) FROM ${ref("bronze_pit")}
+  UNION DISTINCT
+  SELECT session_key, SAFE_CAST(JSON_VALUE(payload,'$.driver_number') AS INT64) FROM ${ref("bronze_position")}
+  UNION DISTINCT
+  SELECT session_key, SAFE_CAST(JSON_VALUE(payload,'$.driver_number') AS INT64) FROM ${ref("bronze_session_result")}
+  UNION DISTINCT
+  SELECT session_key, driver_number FROM ${ref("bronze_car_data")}
+),
+
+atributos AS (
+  SELECT
+    session_key,
+    SAFE_CAST(JSON_VALUE(payload,'$.driver_number') AS INT64) AS drv,
+    ANY_VALUE(JSON_VALUE(payload,'$.full_name'))     AS nome_completo,
+    ANY_VALUE(JSON_VALUE(payload,'$.first_name'))    AS primeiro_nome,
+    ANY_VALUE(JSON_VALUE(payload,'$.last_name'))     AS sobrenome,
+    ANY_VALUE(JSON_VALUE(payload,'$.name_acronym'))  AS sigla,
+    ANY_VALUE(JSON_VALUE(payload,'$.broadcast_name')) AS nome_transmissao,
+    ANY_VALUE(JSON_VALUE(payload,'$.team_name'))     AS equipe,
+    -- team_colour vem sem '#' e muda de ano para ano
+    ANY_VALUE(CONCAT('#', JSON_VALUE(payload,'$.team_colour'))) AS cor_equipe,
+    ANY_VALUE(JSON_VALUE(payload,'$.country_code'))  AS pais_codigo,
+    ANY_VALUE(JSON_VALUE(payload,'$.headshot_url'))  AS foto_url
+  FROM ${ref("bronze_drivers")}
+  GROUP BY session_key, drv
+)
+
+SELECT
+  o.session_key,
+  o.drv AS driver_number,
+  a.nome_completo,
+  a.primeiro_nome,
+  a.sobrenome,
+  a.sigla,
+  a.nome_transmissao,
+  a.equipe,
+  a.cor_equipe,
+  a.pais_codigo,
+  a.foto_url,
+
+  o.drv >= 100              AS eh_piloto_teste,
+  a.drv IS NOT NULL         AS consta_em_drivers,
+
+  CURRENT_TIMESTAMP() AS _data_processamento_silver
+FROM observados o
+LEFT JOIN atributos a ON a.session_key = o.session_key AND a.drv = o.drv
+WHERE o.drv IS NOT NULL

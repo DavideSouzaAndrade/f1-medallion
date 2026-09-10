@@ -18,21 +18,40 @@ LOCAL_OUTPUT_DIR = os.environ.get("LOCAL_OUTPUT_DIR", "./data")
 
 # --- escopo ----------------------------------------------------------------
 
-YEARS = [int(y) for y in os.environ.get("YEARS", "2023,2024,2025").split(",")]
+# A OpenF1 cobre de 2023 em diante. A temporada corrente e gratuita e
+# acessivel sem autenticacao como qualquer outra -- nao ha motivo para
+# deixa-la de fora.
+YEARS = [int(y) for y in os.environ.get("YEARS", "2023,2024,2025,2026").split(",")]
 
-# Sessoes de corrida: usadas para priorizar a telemetria na onda 3.
+# Sessoes de corrida: usadas para priorizar a telemetria na onda 3 e para
+# pular endpoints que a API so publica em corrida.
 RACE_SESSION_NAMES = {"Race", "Sprint"}
+
+# --- atualizacao incremental -----------------------------------------------
+
+# Quanto esperar depois do fim de uma sessao antes de ingeri-la.
+#
+# A OpenF1 continua completando os dados por um tempo depois que a sessao
+# acaba. Ingerir cedo demais grava dado pela metade -- e como o checkpoint
+# e a existencia do objeto, esse arquivo incompleto nunca mais seria
+# rebuscado. A carencia troca algumas horas de atraso por essa garantia.
+GRACE_HOURS = int(os.environ.get("GRACE_HOURS", "24"))
 
 
 # --- ondas de ingestao -----------------------------------------------------
 #
-# A ordem importa. As ondas 1 e 2 sao rapidas (~1h no total) e ja liberam
-# o modelo de degradacao de pneu. A telemetria (ondas 3 e 4) alimenta o
-# modelo de identificacao de piloto. A onda 5 e opcional.
+# A ordem importa. As ondas 1 e 2 sao rapidas e ja liberam o modelo de
+# degradacao de pneu. A telemetria (ondas 3 e 4) alimenta o modelo de
+# identificacao de piloto. As ondas 5 e 6 sao complementares.
 #
 #   scope="year"            -> uma requisicao por ano
 #   scope="session"         -> uma requisicao por sessao
 #   scope="session_driver"  -> uma requisicao por sessao e piloto
+#
+# only_races / skip_races valem tanto no nivel da onda quanto no de um
+# endpoint isolado. No nivel do endpoint servem para nao gastar requisicao
+# em combinacao que a API nunca preenche: intervals, overtakes e as duas
+# tabelas de campeonato so existem em corrida.
 
 WAVES: dict[int, dict] = {
     1: {
@@ -53,6 +72,11 @@ WAVES: dict[int, dict] = {
             {"name": "position", "scope": "session"},
             {"name": "race_control", "scope": "session"},
             {"name": "session_result", "scope": "session"},
+            # Gap ao lider a cada amostra. E o preditor de ar sujo do modelo
+            # de pneu: andar atras de outro carro degrada composto mais rapido,
+            # e sem esta tabela o modelo nao tem como enxergar isso.
+            # ~30 mil linhas por corrida, uma unica requisicao.
+            {"name": "intervals", "scope": "session", "only_races": True},
         ],
     },
     3: {
@@ -73,6 +97,18 @@ WAVES: dict[int, dict] = {
         "nome": "posicao no circuito (opcional)",
         "endpoints": [
             {"name": "location", "scope": "session_driver"},
+        ],
+    },
+    6: {
+        "nome": "contexto adicional",
+        "endpoints": [
+            # Grid de largada: as linhas carregam o session_key da
+            # classificacao, entao a consulta por sessao acerta na quali.
+            {"name": "starting_grid", "scope": "session"},
+            {"name": "team_radio", "scope": "session"},
+            {"name": "overtakes", "scope": "session", "only_races": True},
+            {"name": "championship_drivers", "scope": "session", "only_races": True},
+            {"name": "championship_teams", "scope": "session", "only_races": True},
         ],
     },
 }

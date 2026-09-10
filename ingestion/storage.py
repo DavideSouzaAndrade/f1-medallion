@@ -3,6 +3,10 @@
 Duas implementacoes com a mesma interface: GCS (producao) e disco local
 (testes). O checkpoint da ingestao e a propria existencia do objeto:
 antes de chamar a API, verificamos se o arquivo ja esta la.
+
+Resultado vazio tambem vira arquivo -- um .json.gz de zero linhas. Sem
+isso a combinacao nunca entra no checkpoint e volta a ser consultada em
+toda execucao.
 """
 
 from __future__ import annotations
@@ -11,8 +15,8 @@ import gzip
 import io
 import json
 import logging
-import os
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +46,11 @@ class Storage(ABC):
     def write_bytes(self, path: str, payload: bytes) -> None: ...
 
     @abstractmethod
-    def append_line(self, path: str, line: str) -> None: ...
+    def write_text(self, path: str, text: str) -> None: ...
+
+    @abstractmethod
+    def read_text(self, path: str) -> str | None:
+        """Conteudo do objeto, ou None se ele nao existir."""
 
     def write_records(self, path: str, records: list[dict[str, Any]]) -> int:
         payload = to_ndjson_gz(records)
@@ -66,11 +74,14 @@ class GCSStorage(Storage):
         blob.content_encoding = None
         blob.upload_from_string(payload, content_type="application/gzip")
 
-    def append_line(self, path: str, line: str) -> None:
-        # GCS nao tem append; cada execucao grava seu proprio arquivo de manifesto.
+    def write_text(self, path: str, text: str) -> None:
+        self.bucket.blob(path).upload_from_string(text, content_type="application/x-ndjson")
+
+    def read_text(self, path: str) -> str | None:
         blob = self.bucket.blob(path)
-        existing = blob.download_as_text() if blob.exists(self.client) else ""
-        blob.upload_from_string(existing + line + "\n", content_type="application/x-ndjson")
+        if not blob.exists(self.client):
+            return None
+        return blob.download_as_text()
 
 
 class LocalStorage(Storage):
@@ -88,11 +99,101 @@ class LocalStorage(Storage):
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_bytes(payload)
 
-    def append_line(self, path: str, line: str) -> None:
+    def write_text(self, path: str, text: str) -> None:
         full = self._full(path)
         full.parent.mkdir(parents=True, exist_ok=True)
-        with full.open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+        full.write_text(text, encoding="utf-8")
+
+    def read_text(self, path: str) -> str | None:
+        full = self._full(path)
+        if not full.exists():
+            return None
+        return full.read_text(encoding="utf-8")
+
+
+class StateStore:
+    """Guarda a marca d'agua da ingestao incremental.
+
+    A marca d'agua e um marcador de pagina: uma data dizendo "ja cuidei de
+    toda sessao que terminou antes disto". Guardada por onda, porque as
+    ondas avancam de forma independente -- voce pode estar em dia na onda 2
+    e atrasado na 3.
+
+    O arquivo em _state/watermark.json:
+
+        {
+          "atualizado_em": "2026-09-15T06:00:00+00:00",
+          "ondas": {"2": {"ate": "2026-09-13T15:00:00+00:00"}}
+        }
+
+    Sem esse marcador, descobrir o que e novo exige perguntar ao bucket
+    sobre cada objeto de cada sessao de cada temporada. Com ele, basta uma
+    requisicao a /sessions e um filtro por data.
+    """
+
+    def __init__(self, storage: Storage, prefix: str) -> None:
+        self.storage = storage
+        self.path = state_path(prefix)
+
+    def _ler(self) -> dict[str, Any]:
+        bruto = self.storage.read_text(self.path)
+        if not bruto:
+            return {}
+        try:
+            return json.loads(bruto)
+        except json.JSONDecodeError:
+            log.warning("estado em %s ilegivel; tratando como vazio", self.path)
+            return {}
+
+    def marca(self, wave: int) -> str | None:
+        """Data ate a qual esta onda ja foi ingerida, ou None na primeira vez."""
+        return self._ler().get("ondas", {}).get(str(wave), {}).get("ate")
+
+    def avancar(self, wave: int, ate: str) -> None:
+        estado = self._ler()
+        estado.setdefault("ondas", {})[str(wave)] = {"ate": ate}
+        estado["atualizado_em"] = datetime.now(timezone.utc).isoformat()
+        self.storage.write_text(self.path, json.dumps(estado, indent=2, ensure_ascii=False))
+        log.info("marca d'agua da onda %d avancou para %s", wave, ate)
+
+
+class ManifestWriter:
+    """Acumula as entradas do manifesto e grava em partes.
+
+    O GCS nao tem append. Reescrever o manifesto inteiro a cada requisicao
+    custa uma leitura e uma escrita do arquivo acumulado -- na onda 4, com
+    milhares de objetos, isso e trafego quadratico e ainda abre corrida
+    entre duas execucoes simultaneas.
+
+    Aqui cada flush cria um objeto novo, `part-NNNN.jsonl`, sob o prefixo
+    do run_id. Nada e lido de volta, nada e sobrescrito, e execucoes
+    distintas tem run_id distinto, entao nao colidem. A tabela externa do
+    manifesto le todas as partes como um arquivo so.
+    """
+
+    def __init__(self, storage: Storage, prefix: str, run_id: str, flush_every: int = 200) -> None:
+        self.storage = storage
+        self.base = manifest_prefix(prefix, run_id)
+        self.flush_every = flush_every
+        self._buffer: list[str] = []
+        self._parts = 0
+
+    def add(self, entry: dict[str, Any]) -> None:
+        self._buffer.append(json.dumps(entry, ensure_ascii=False))
+        if len(self._buffer) >= self.flush_every:
+            self.flush()
+
+    def flush(self) -> None:
+        if not self._buffer:
+            return
+        self._parts += 1
+        path = f"{self.base}/part-{self._parts:04d}.jsonl"
+        try:
+            self.storage.write_text(path, "\n".join(self._buffer) + "\n")
+        except Exception as exc:  # manifesto nao pode derrubar a ingestao
+            log.warning("nao foi possivel gravar a parte %s do manifesto: %s", path, exc)
+        else:
+            self._buffer.clear()
 
 
 # --- convencao de caminhos -------------------------------------------------
@@ -118,5 +219,9 @@ def object_path(
     return "/".join(parts)
 
 
-def manifest_path(prefix: str, run_id: str) -> str:
-    return f"{prefix}/_manifest/run_id={run_id}/log.jsonl"
+def manifest_prefix(prefix: str, run_id: str) -> str:
+    return f"{prefix}/_manifest/run_id={run_id}"
+
+
+def state_path(prefix: str) -> str:
+    return f"{prefix}/_state/watermark.json"

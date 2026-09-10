@@ -1,0 +1,14 @@
+# Espelha o .gitignore: nada de cache, ambiente virtual ou dado bruto
+# deve entrar na imagem enviada ao Cloud Build.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+data/
+*.json.gz
+*.csv
+.git/
+.gitignore
+*.log
+.DS_Store

@@ -1,0 +1,94 @@
+config {
+  type: "table",
+  schema: "f1_gold",
+  name: "gold_degradacao_pneu",
+  tags: ["gold", "modelo_pneu"],
+  description: "Tabela de treino do modelo 1: regressao do tempo de volta em funcao da degradacao do pneu. Uma linha por volta limpa de corrida.",
+  bigquery: { clusterBy: ["composto", "circuit_key"] },
+  columns: {
+    alvo_duracao_s: "Variavel resposta: tempo da volta em segundos.",
+    idade_pneu: "Voltas rodadas com este jogo de pneu. O regressor de interesse.",
+    volta_corrida: "Numero da volta na corrida. Proxy de carga de combustivel -- SEM ele a regressao atribui ao pneu um efeito que e do tanque, e chega a inverter o sinal.",
+    volta_no_stint: "Posicao da volta dentro do stint. Captura o aquecimento do pneu, que torna as primeiras voltas lentas.",
+    gap_medio_a_frente: "Ar sujo: rodar atras de outro carro acelera a degradacao.",
+    temp_pista: "Temperatura do asfalto, principal fator externo de degradacao."
+  },
+  assertions: {
+    nonNull: ["alvo_duracao_s", "idade_pneu", "volta_corrida", "composto"]
+  }
+}
+
+-- Recorte: apenas corridas.
+--
+-- Medido na analise exploratoria: corrida rende 86,7% de voltas aproveitaveis
+-- contra ~55% em treino e classificacao, onde o carro entra e sai do box o
+-- tempo todo. E a degradacao em stint longo so existe em corrida mesmo.
+--
+-- O corte de volta limpa aqui e mais frouxo que o da Silver (1,15 em vez de
+-- 1,07): o corte apertado descartaria justamente as voltas mais degradadas,
+-- que sao o extremo do fenomeno que se quer modelar.
+
+WITH voltas AS (
+  SELECT
+    v.*,
+    s.year, s.circuit_key, s.circuito, s.circuit_type, s.session_name,
+    ROW_NUMBER() OVER (
+      PARTITION BY v.session_key, v.driver_number, v.stint_number
+      ORDER BY v.lap_number
+    ) AS volta_no_stint
+  FROM ${ref("silver_voltas")} v
+  JOIN ${ref("silver_sessoes")} s USING (session_key)
+  WHERE s.eh_corrida
+    AND NOT s.eh_teste
+    AND v.stint_valido
+    AND v.duracao_s IS NOT NULL
+    AND NOT v.eh_saida_box
+    AND NOT v.eh_entrada_box
+    AND v.composto IN ('SOFT', 'MEDIUM', 'HARD')
+    AND v.idade_pneu IS NOT NULL
+    -- Corte frouxo: mantem a cauda degradada, corta so o que e anomalia
+    -- (safety car, bandeira amarela, problema mecanico).
+    AND v.razao_mediana_sessao <= 1.15
+)
+
+SELECT
+  -- Identificacao (nao entra no treino, serve para auditar)
+  session_key,
+  driver_number,
+  lap_number,
+  year,
+
+  -- Alvo
+  duracao_s AS alvo_duracao_s,
+
+  -- Regressores do pneu
+  idade_pneu,
+  volta_no_stint,
+  composto,
+  stint_number,
+
+  -- Proxy de combustivel. Sem isto o modelo erra o sinal do pneu.
+  lap_number AS volta_corrida,
+
+  -- Trafego
+  gap_medio_a_frente,
+  COALESCE(voltas_atras, 0) AS voltas_atras,
+
+  -- Condicoes
+  temp_pista,
+  temp_ar,
+  umidade,
+  chuva,
+  vento_kmh,
+
+  -- Circuito
+  circuit_key,
+  circuito,
+  circuit_type,
+
+  -- Normalizacoes uteis
+  razao_mediana_sessao,
+  razao_melhor_sessao,
+
+  CURRENT_TIMESTAMP() AS _data_processamento_gold
+FROM voltas
