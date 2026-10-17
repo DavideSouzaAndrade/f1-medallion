@@ -51,7 +51,16 @@ class Instancia(BaseModel):
         return d
 
 
+EXEMPLO_VOLTA = {"composto": "MEDIUM", "idade_pneu": 20, "volta_no_stint": 20, "volta_corrida": 23,
+                 "gap_medio_a_frente": 3.328, "temp_pista": 53.8, "temp_ar": 32.4, "umidade": 37.5,
+                 "circuito": "Monza", "circuit_type": "Permanent"}
+
+
 class Requisicao(BaseModel):
+    # exemplo que aparece preenchido no "Try it out" do /docs
+    model_config = ConfigDict(json_schema_extra={"examples": [{"instancias": [
+        EXEMPLO_VOLTA, {**EXEMPLO_VOLTA, "composto": "SOFT", "idade_pneu": 5, "volta_no_stint": 5}]}]})
+
     instancias: list[Instancia] = Field(..., min_length=1, max_length=MAX_INSTANCIAS)
 
 
