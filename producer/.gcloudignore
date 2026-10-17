@@ -1,0 +1,11 @@
+# O gcloud so le o .gcloudignore da pasta enviada (--source=producer), nao o
+# da raiz do repositorio. Sem este arquivo, o ambiente virtual local subiria
+# inteiro para o Cloud Build.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.gcloudignore
+*.log
+.DS_Store

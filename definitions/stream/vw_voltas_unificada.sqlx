@@ -1,0 +1,93 @@
+config {
+  type: "view",
+  schema: "f1_silver",
+  name: "vw_voltas_unificada",
+  tags: ["stream"],
+  description: "Todas as voltas, historicas e em tempo real, no mesmo formato. A coluna origem diz se a volta veio do batch (silver_voltas) ou do stream (f1_stream.voltas).",
+  columns: {
+    origem: "'batch' para a silver_voltas, carregada pelo Dataform; 'stream' para f1_stream.voltas, gravada continuamente pelo Dataflow.",
+    _ts_processamento: "Quando a linha foi processada: no batch, a execucao da Silver; no stream, a passagem pelo Dataflow.",
+    evento_id: "So no stream. Nulo no batch.",
+    replay_id: "So no stream: a execucao do gerador que publicou o evento. Nulo no batch."
+  }
+}
+
+-- A view e o ponto onde o batch e o stream se encontram. Ela nao guarda
+-- dado: cada consulta le as duas tabelas naquele momento, entao o lado do
+-- stream cresce sozinho enquanto o gerador publica.
+--
+--   SELECT origem, COUNT(*) FROM f1_silver.vw_voltas_unificada GROUP BY origem
+--
+-- Fica em f1_silver e nao em f1_gold porque o grao e o da silver_voltas,
+-- uma linha por (sessao, piloto, volta), sem agregacao.
+--
+-- So entram as colunas que existem dos dois lados. As de diagnostico da
+-- Silver (volta_limpa, razao_mediana_sessao) dependem da sessao inteira e
+-- nao existem para um evento que acabou de chegar; as do stream
+-- (latencia_ms, apto_modelo) nao existem no batch. Quem precisar delas le
+-- a tabela de origem.
+--
+-- Num replay a mesma volta aparece duas vezes, uma em cada origem: o
+-- gerador reproduz uma corrida que ja esta na Silver. Nao e duplicata, e o
+-- mesmo fato visto pelos dois caminhos; para isolar o stream, filtrar por
+-- origem ou por replay_id.
+
+WITH stream_deduplicado AS (
+  -- O Pub/Sub entrega pelo menos uma vez: a mesma mensagem pode ser gravada
+  -- duas vezes pelo Dataflow. Fica a primeira gravacao de cada evento.
+  SELECT *
+  FROM ${ref("f1_stream", "voltas")}
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY evento_id ORDER BY _ts_processamento) = 1
+)
+
+SELECT
+  'batch'                     AS origem,
+  session_key,
+  driver_number,
+  lap_number,
+  data_inicio,
+  duracao_s,
+  setor_1_s,
+  setor_2_s,
+  setor_3_s,
+  composto,
+  stint_number,
+  idade_pneu,
+  eh_saida_box,
+  eh_entrada_box,
+  gap_medio_a_frente,
+  temp_ar,
+  temp_pista,
+  umidade,
+  chuva,
+  _data_processamento_silver  AS _ts_processamento,
+  CAST(NULL AS STRING)        AS evento_id,
+  CAST(NULL AS STRING)        AS replay_id
+FROM ${ref("silver_voltas")}
+
+UNION ALL
+
+SELECT
+  'stream'                    AS origem,
+  session_key,
+  driver_number,
+  lap_number,
+  data_inicio,
+  duracao_s,
+  setor_1_s,
+  setor_2_s,
+  setor_3_s,
+  composto,
+  stint_number,
+  idade_pneu,
+  eh_saida_box,
+  eh_entrada_box,
+  gap_medio_a_frente,
+  temp_ar,
+  temp_pista,
+  umidade,
+  chuva,
+  _ts_processamento,
+  evento_id,
+  replay_id
+FROM stream_deduplicado

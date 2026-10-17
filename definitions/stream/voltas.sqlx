@@ -1,0 +1,77 @@
+config {
+  type: "operations",
+  schema: "f1_stream",
+  name: "voltas",
+  hasOutput: true,
+  tags: ["stream"],
+  description: "Voltas recebidas em tempo real: uma linha por evento publicado no Pub/Sub e gravado pelo Dataflow. Mesmo grao da silver_voltas (sessao, piloto, volta), com os campos do contrato v1 do evento."
+}
+
+-- operations com CREATE TABLE IF NOT EXISTS, e nao type "table", de
+-- proposito: uma tabela comum do Dataform e recriada a cada execucao a
+-- partir de um SELECT, o que apagaria tudo o que o streaming ja gravou.
+-- Aqui o Dataform so garante que a tabela existe; quem escreve nela e o
+-- Dataflow.
+--
+-- Mudar o schema depois de criada exige ALTER TABLE: rodar este arquivo de
+-- novo nao altera uma tabela que ja existe.
+--
+-- Particao por DATE(ts_evento), a hora em que o evento foi publicado, e nao
+-- por data_inicio, a hora original da volta: num replay as duas diferem em
+-- semanas, e o que importa para o stream e quando o dado chegou. Uma
+-- consulta "o que entrou hoje" le uma unica particao.
+--
+-- Cluster por sessao e piloto, igual a silver_voltas: as consultas da view
+-- unificada e da API filtram por esses dois campos.
+
+CREATE TABLE IF NOT EXISTS ${self()} (
+  -- Controle do evento
+  evento_id          STRING    NOT NULL OPTIONS (description = "UUID por mensagem. O Pub/Sub entrega pelo menos uma vez: a deduplicacao e por este campo."),
+  replay_id          STRING    NOT NULL OPTIONS (description = "Uma execucao do gerador. Separa dois replays da mesma corrida."),
+  ts_evento          TIMESTAMP NOT NULL OPTIONS (description = "Hora da publicacao no Pub/Sub, em UTC. Define a particao."),
+
+  -- Chave natural, a mesma da silver_voltas
+  session_key        INT64     NOT NULL,
+  driver_number      INT64     NOT NULL,
+  lap_number         INT64     NOT NULL,
+  year               INT64     NOT NULL,
+  circuito           STRING    NOT NULL,
+  circuit_type       STRING    NOT NULL OPTIONS (description = "Permanent, Temporary - Street ou Temporary - Road."),
+
+  -- A volta
+  data_inicio        TIMESTAMP OPTIONS (description = "Inicio original da volta na corrida. Num replay, e anterior ao ts_evento."),
+  duracao_s          FLOAT64,
+  setor_1_s          FLOAT64,
+  setor_2_s          FLOAT64,
+  setor_3_s          FLOAT64,
+
+  -- Pneu
+  composto           STRING    OPTIONS (description = "SOFT, MEDIUM, HARD, INTERMEDIATE, WET, UNKNOWN ou TEST_UNKNOWN."),
+  stint_number       INT64,
+  idade_pneu         INT64,
+  volta_no_stint     INT64     OPTIONS (description = "Posicao da volta entre as voltas limpas do stint, calculada pelo gerador igual a gold_degradacao_pneu."),
+  eh_saida_box       BOOL      NOT NULL,
+  eh_entrada_box     BOOL      NOT NULL,
+
+  -- Trafego e clima
+  gap_medio_a_frente FLOAT64   OPTIONS (description = "0,0 para o lider da volta; nulo quando nao houve medicao."),
+  temp_ar            FLOAT64,
+  temp_pista         FLOAT64,
+  umidade            FLOAT64,
+  chuva              INT64     OPTIONS (description = "0 ou 1, como na silver_voltas."),
+
+  -- Acrescentado pelo Dataflow
+  apto_modelo        BOOL      NOT NULL OPTIONS (description = "Composto seco, tempo, idade do pneu e temperatura da pista presentes, e fora do box. A volta inapta e gravada mesmo assim, como na Silver."),
+  _ts_processamento  TIMESTAMP NOT NULL OPTIONS (description = "Hora em que o Dataflow processou o evento."),
+  latencia_ms        INT64     OPTIONS (description = "_ts_processamento menos ts_evento: o atraso de ponta a ponta do pipeline."),
+
+  -- Preenchido a partir da parte 3, quando o Dataflow passa a chamar a API.
+  -- Criadas ja agora para que a parte 3 nao precise migrar o schema.
+  tempo_previsto_s   FLOAT64   OPTIONS (description = "Tempo de volta previsto pela API no Cloud Run. Nulo na parte 2."),
+  modelo_versao      STRING    OPTIONS (description = "Versao do modelo que gerou a previsao. Nulo na parte 2.")
+)
+PARTITION BY DATE(ts_evento)
+CLUSTER BY session_key, driver_number
+OPTIONS (
+  description = "Voltas recebidas em tempo real pelo Pub/Sub e gravadas pelo Dataflow. Contrato do evento: v1."
+)
