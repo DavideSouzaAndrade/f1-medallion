@@ -52,7 +52,7 @@ Exemplo com dados reais (piloto 44, volta 23, GP da Itália de 2026):
 | `setor_1_s`, `setor_2_s`, `setor_3_s` | FLOAT64 | não | — |
 | `composto` | STRING | não | `SOFT`, `MEDIUM`, `HARD`, `INTERMEDIATE`, `WET`, `UNKNOWN`, `TEST_UNKNOWN` |
 | `stint_number`, `idade_pneu` | INT64 | não | `idade_pneu` ≥ 0 |
-| `volta_no_stint` | INT64 | não | Posição da volta no stint, contando todas as voltas (a Gold conta só as limpas) |
+| `volta_no_stint` | INT64 | não | Calculada como na Gold: posição entre as voltas limpas do stint. Volta que não entra na Gold recebe a posição que teria se fosse limpa. Nula só sem `stint_number` |
 | `eh_saida_box`, `eh_entrada_box` | BOOL | sim | — |
 | `gap_medio_a_frente` | FLOAT64 | não | 0,0 para o líder da volta (~5%); nulo quando não houve medição (~0,8%) |
 | `temp_ar`, `temp_pista`, `umidade` | FLOAT64 | não | — |

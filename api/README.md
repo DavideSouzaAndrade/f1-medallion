@@ -62,9 +62,5 @@ bash api/testar.sh <URL>          # health, 1 volta, lote, erro 422 e latência 
 - **Sem Vertex Endpoint:** cobraria por hora; o Cloud Run escala a zero e o modelo roda em memória.
 - **Conta de serviço própria (`f1-api`):** só leitura no bucket e permissão de consulta no BigQuery.
 - **Região:** `us-central1`, a mesma do bucket e do Registry.
-
-## Ponto aberto: `volta_no_stint`
-
-Na Gold ela conta só as voltas limpas do stint; o gerador conta todas. É training-serving skew:
-a API recebe uma feature calculada de forma diferente da usada no treino. A diferença é pequena;
-a proposta é o gerador calcular igual à Gold.
+- **`volta_no_stint` igual à do treino:** o gerador calcula a feature com o mesmo filtro da Gold
+  (só voltas limpas do stint), evitando training-serving skew. Conferido em 5.052 voltas de 5 corridas.

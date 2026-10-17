@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS ${self()} (
   composto           STRING    OPTIONS (description = "SOFT, MEDIUM, HARD, INTERMEDIATE, WET, UNKNOWN ou TEST_UNKNOWN."),
   stint_number       INT64,
   idade_pneu         INT64,
-  volta_no_stint     INT64     OPTIONS (description = "Posicao da volta no stint, calculada pelo gerador sobre todas as voltas do stint."),
+  volta_no_stint     INT64     OPTIONS (description = "Posicao da volta entre as voltas limpas do stint, calculada pelo gerador igual a gold_degradacao_pneu."),
   eh_saida_box       BOOL      NOT NULL,
   eh_entrada_box     BOOL      NOT NULL,
 

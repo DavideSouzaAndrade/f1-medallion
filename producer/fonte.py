@@ -17,12 +17,38 @@ import config
 # cada volta, e ordenar pelo fim intercala os pilotos como na corrida real.
 # Volta sem data nenhuma vai para o fim, para nao travar o relogio do replay.
 #
-# volta_no_stint e calculada aqui, sobre todas as voltas do stint. A Gold
-# conta so as voltas limpas; a diferenca esta registrada no contrato.
+# volta_no_stint precisa ser calculada exatamente como na Gold, que e onde o
+# modelo aprendeu: la ela e o ROW_NUMBER no stint contando so as voltas que
+# passam no filtro de definitions/gold/gold_degradacao_pneu.sqlx. Contar
+# todas as voltas daria a API uma feature diferente da do treino
+# (training-serving skew). `entra_na_gold` replica aquele filtro, so com as
+# condicoes de volta -- as de sessao (corrida, nao teste) valem para a
+# corrida inteira que esta sendo reproduzida.
+#
+# Para uma volta que entra na Gold, o resultado e identico ao da Gold. Para
+# uma que nao entra (saida de box, safety car), e a posicao que ela teria
+# se fosse limpa: as voltas limpas anteriores mais um. Assim o evento nunca
+# chega sem o campo so porque a volta nao seria usada no treino.
 #
 # eh_saida_box e eh_entrada_box sao obrigatorios no contrato. Nulo na Silver
 # significa que a origem nao marcou a volta, e ausencia de marca e "nao".
 _SQL_VOLTAS = """
+WITH voltas AS (
+  SELECT
+    *,
+    COALESCE(
+      stint_valido
+      AND duracao_s IS NOT NULL
+      AND NOT eh_saida_box
+      AND NOT eh_entrada_box
+      AND composto IN ('SOFT', 'MEDIUM', 'HARD')
+      AND idade_pneu IS NOT NULL
+      AND razao_mediana_sessao <= 1.15,
+      FALSE
+    ) AS entra_na_gold
+  FROM `{projeto}.{dataset}.silver_voltas`
+  WHERE session_key = @session_key
+)
 SELECT
   v.session_key,
   v.driver_number,
@@ -40,7 +66,11 @@ SELECT
   v.stint_number,
   v.idade_pneu,
   IF(v.stint_number IS NULL, NULL,
-     ROW_NUMBER() OVER (PARTITION BY v.driver_number, v.stint_number ORDER BY v.lap_number)
+     1 + COALESCE(SUM(IF(v.entra_na_gold, 1, 0)) OVER (
+       PARTITION BY v.driver_number, v.stint_number
+       ORDER BY v.lap_number
+       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+     ), 0)
   ) AS volta_no_stint,
   COALESCE(v.eh_saida_box, FALSE)   AS eh_saida_box,
   COALESCE(v.eh_entrada_box, FALSE) AS eh_entrada_box,
@@ -49,9 +79,8 @@ SELECT
   v.temp_pista,
   v.umidade,
   v.chuva
-FROM `{projeto}.{dataset}.silver_voltas` v
+FROM voltas v
 JOIN `{projeto}.{dataset}.silver_sessoes` s USING (session_key)
-WHERE v.session_key = @session_key
 ORDER BY
   COALESCE(v.data_fim, v.data_inicio) IS NULL,
   COALESCE(v.data_fim, v.data_inicio),
