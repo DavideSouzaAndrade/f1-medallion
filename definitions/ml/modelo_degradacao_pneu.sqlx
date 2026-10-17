@@ -26,7 +26,11 @@ OPTIONS (
   input_label_cols = ['alvo_duracao_s'],
   data_split_method = 'AUTO_SPLIT',
   enable_global_explain = TRUE,
-  l2_reg = 0.1
+  l2_reg = 0.1,
+
+  -- Parte 2: cada retreino vira uma nova versao no Vertex AI Model Registry
+  model_registry = 'vertex_ai',
+  vertex_ai_model_id = 'f1-degradacao-pneu'
 ) AS
 SELECT
   alvo_duracao_s,
