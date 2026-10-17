@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS ${self()} (
   eh_entrada_box     BOOL      NOT NULL,
 
   -- Trafego e clima
-  gap_medio_a_frente FLOAT64   OPTIONS (description = "Nulo quando nao ha carro a frente medido."),
+  gap_medio_a_frente FLOAT64   OPTIONS (description = "0,0 para o lider da volta; nulo quando nao houve medicao."),
   temp_ar            FLOAT64,
   temp_pista         FLOAT64,
   umidade            FLOAT64,
