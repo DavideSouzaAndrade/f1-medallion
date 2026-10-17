@@ -79,6 +79,12 @@ async def medir_latencia(request: Request, call_next):
     return resp
 
 
+@app.get("/")
+def raiz():
+    return {"servico": "f1-degradacao-pneu", "modelo": MODELO,
+            "rotas": {"documentacao": "/docs", "saude": "GET /health", "predicao": "POST /predict"}}
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "modelo": MODELO, "backend": preditor.nome}
