@@ -1,0 +1,30 @@
+config {
+  type: "operations",
+  schema: "f1_stream",
+  name: "voltas_dlq",
+  hasOutput: true,
+  tags: ["stream"],
+  description: "Dead-letter do stream: eventos que o Dataflow rejeitou, guardados crus junto com o motivo."
+}
+
+-- Mesmo raciocinio da f1_stream.voltas: operations com IF NOT EXISTS para
+-- que uma execucao do Dataform nunca apague o que o Dataflow gravou.
+--
+-- O evento fica como STRING, e nao em colunas tipadas, porque o que chega
+-- aqui e justamente o que nao respeitou o schema: JSON quebrado, campo
+-- faltando, tipo errado. Tipar seria perder exatamente o que se quer
+-- investigar.
+--
+-- Particoes expiram em 30 dias: a DLQ serve para diagnosticar o pipeline,
+-- nao e historico.
+
+CREATE TABLE IF NOT EXISTS ${self()} (
+  evento_bruto       STRING    OPTIONS (description = "Corpo da mensagem como chegou do Pub/Sub, sem nenhuma alteracao."),
+  motivo             STRING    NOT NULL OPTIONS (description = "Por que o evento foi rejeitado: JSON invalido, campo obrigatorio ausente, tipo errado, lap_number <= 0, duracao_s <= 0, composto fora da lista."),
+  _ts_processamento  TIMESTAMP NOT NULL OPTIONS (description = "Hora em que o Dataflow rejeitou o evento.")
+)
+PARTITION BY DATE(_ts_processamento)
+OPTIONS (
+  description = "Eventos rejeitados pelo Dataflow, com o motivo. Contrato do evento: v1.",
+  partition_expiration_days = 30
+)
