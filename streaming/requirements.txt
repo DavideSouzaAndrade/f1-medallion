@@ -1,0 +1,6 @@
+apache-beam[gcp]==2.77.0
+
+# O Beam empacota o setup.py com estes dois ao lancar no Dataflow.
+# Um venv de Python 3.12+ nao traz mais setuptools por padrao.
+setuptools>=70
+build>=1.2

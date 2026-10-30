@@ -34,8 +34,10 @@ O batch guarda o histórico e treina o modelo; o streaming traz as voltas
 novas; a view unificada é onde os dois se encontram, com a coluna `origem`
 dizendo o caminho de cada volta.
 
-> **[A PREENCHER — frente B]** Uma linha sobre o papel do Dataflow no
-> diagrama acima.
+O Dataflow é a peça do meio do streaming: um job Apache Beam que fica de pé
+consumindo a assinatura, valida cada evento contra o contrato v1, marca o que
+serve ao modelo e grava — a volta boa em `f1_stream.voltas`, a rejeitada em
+`f1_stream.voltas_dlq` com o motivo.
 
 ---
 
@@ -46,23 +48,22 @@ dizendo o caminho de cada volta.
 ├── definitions/   SQL do Dataform: bronze, silver, gold, ml e stream
 ├── includes/      catálogo dos endpoints usado pelo Dataform
 ├── producer/      gerador de eventos: replay de corrida no Pub/Sub
-├── streaming/     [A PREENCHER — frente B] pipeline do Dataflow
+├── streaming/     pipeline Dataflow: Pub/Sub → validação → BigQuery, com DLQ
 ├── model/         exportação e avaliação do modelo
 ├── api/           API de predição no Cloud Run
 ├── setup/         provisionamento do GCP (batch e streaming)
-├── docs/          documentação de apoio (ver abaixo)
-└── relatorio.md   relatório de implementação da parte 1
+└── docs/          documentação de apoio (ver abaixo)
 ```
 
 ## Documentação
 
 | Documento | Conteúdo |
 |-----------|----------|
-| [relatorio.md](relatorio.md) | Relatório de implementação da parte 1: escolhas, problemas encontrados, custos e resultados dos modelos |
 | [docs/perfil-dados-bronze.md](docs/perfil-dados-bronze.md) | Campo a campo dos 18 endpoints na Bronze e a proposta de estrutura da Silver |
 | [docs/analise-exploratoria.md](docs/analise-exploratoria.md) | Qualidade dos dados medida na Bronze e a decisão de tratamento que cada achado implica |
 | [docs/ingestao-incremental.md](docs/ingestao-incremental.md) | Como a ingestão se atualiza com as corridas novas sem varrer tudo |
 | [docs/contrato-evento.md](docs/contrato-evento.md) | Formato do evento de volta no Pub/Sub: campos, tipos e o que vai para a DLQ |
+| [docs/plano-frente-b.md](docs/plano-frente-b.md) | Plano e decisões do pipeline Dataflow: desenho, ordem da validação e custo |
 
 ---
 
@@ -89,10 +90,17 @@ bash producer/deploy.sh
 gcloud run jobs execute f1-gerador --region=us-central1
 ```
 
-**Pipeline de streaming**
+**Pipeline de streaming** — [streaming/README.md](streaming/README.md)
 
-> **[A PREENCHER — frente B]** Como subir e parar o job do Dataflow, com
-> link para `streaming/README.md`.
+```bash
+python streaming/test_validacao.py                    # contrato, offline
+cd streaming && python pipeline.py --runner DirectRunner --duracao 120
+bash streaming/subir.sh                               # sobe no Dataflow
+bash streaming/parar.sh                               # drena e desliga
+```
+
+O job de streaming cobra por hora ligado — não escala a zero como o Cloud
+Run. O `parar.sh` é o que fecha a torneira.
 
 **API de predição** — [api/README.md](api/README.md)
 

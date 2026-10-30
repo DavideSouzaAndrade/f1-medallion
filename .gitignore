@@ -19,3 +19,7 @@ service-account*.json
 .idea/
 .vscode/
 .df-credentials.json
+.gcloudignore
+dead_docs/
+*.egg-info/
+dist/
