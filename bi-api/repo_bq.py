@@ -148,10 +148,17 @@ class RepoBigQuery:
 
     def replays(self) -> list[dict]:
         return self._rodar(f"""
-            WITH v AS ({_stream_dedup("TRUE")})
-            SELECT replay_id, session_key, ANY_VALUE(circuito) AS circuito,
-                   COUNT(*) AS eventos, MAX(ts_evento) AS ultimo_evento
-            FROM v GROUP BY replay_id, session_key
+            WITH v AS ({_stream_dedup("TRUE")}),
+            totais AS (
+              SELECT session_key, COUNT(*) AS voltas_na_corrida
+              FROM {_tabela(cfg.T_SILVER_VOLTAS)}
+              WHERE session_key IN (SELECT DISTINCT session_key FROM v)
+              GROUP BY session_key)
+            SELECT v.replay_id, v.session_key, ANY_VALUE(v.circuito) AS circuito,
+                   COUNT(*) AS eventos, MAX(v.ts_evento) AS ultimo_evento,
+                   ANY_VALUE(t.voltas_na_corrida) AS voltas_na_corrida
+            FROM v LEFT JOIN totais t USING (session_key)
+            GROUP BY v.replay_id, v.session_key
             ORDER BY ultimo_evento DESC LIMIT 20""")
 
     def eventos_stream(self, desde: Optional[datetime], limite: int) -> list[dict]:

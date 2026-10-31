@@ -67,6 +67,7 @@ export interface Replay {
   circuito: string | null;
   eventos: number;
   ultimo_evento: string;
+  voltas_na_corrida: number | null;
 }
 
 export interface EventoStream {

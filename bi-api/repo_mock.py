@@ -177,7 +177,8 @@ class RepoMock:
         for e in self._visiveis():
             grupos.setdefault(e["replay_id"], []).append(e)
         return [{"replay_id": r, "session_key": SESSAO_AO_VIVO, "circuito": SESSOES[SESSAO_AO_VIVO][1],
-                 "eventos": len(es), "ultimo_evento": es[-1]["ts_evento"]}
+                 "eventos": len(es), "ultimo_evento": es[-1]["ts_evento"],
+                 "voltas_na_corrida": SESSOES[SESSAO_AO_VIVO][4] * len(PILOTOS)}
                 for r, es in sorted(grupos.items(), reverse=True)]
 
     def previsto_real(self, session_key: Optional[int], replay_id: Optional[str], limite: int) -> dict:

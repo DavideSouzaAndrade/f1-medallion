@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Replay } from "../api";
 import { Cartao, Faixa, Kpi, SeloOrigem, Tip, Vazio } from "../components/ui";
 import { corSerie, dominioRobusto, fmtHa, fmtHora, fmtInt, fmtMs, fmtVolta } from "../format";
-import { EstadoAoVivo, useRelogio } from "../hooks";
+import { EstadoAoVivo, useApi, useRelogio } from "../hooks";
 
 const SEM_DADOS_NOVOS_S = 60;
 const dominioTempo = [(min: number) => Math.floor(min - 1), (max: number) => Math.ceil(max + 1)] as [
@@ -32,6 +33,11 @@ export default function AoVivo({ vivo }: { vivo: EstadoAoVivo }) {
   const escalaRitmo = useMemo(
     () => dominioRobusto(ritmo.flatMap((l) => Object.entries(l).filter(([k, v]) => k !== "volta" && v != null).map(([, v]) => v as number))),
     [ritmo]);
+
+  // Total de voltas da corrida (Silver), para o progresso do replay. Só atualiza enquanto há replay.
+  const replaysApi = useApi<Replay[]>("/api/stream/replays", replayId ? {} : null, 5000);
+  const totalVoltas = replaysApi.dados?.find((r) => r.replay_id === replayId)?.voltas_na_corrida ?? null;
+  const progresso = totalVoltas ? Math.min(100, Math.round((100 * eventos.length) / totalVoltas)) : null;
 
   const ultimo = eventos[eventos.length - 1];
   const latencias = eventos.map((e) => e.latencia_ms).filter((x): x is number => x != null).sort((a, b) => a - b);
@@ -72,6 +78,15 @@ export default function AoVivo({ vivo }: { vivo: EstadoAoVivo }) {
         <Kpi rotulo="Latência do pipeline" valor={fmtMs(ultimo?.latencia_ms)} detalhe={`mediana ${fmtMs(mediana)}`} />
         <Kpi rotulo="Aptas ao modelo" valor={fmtInt(aptos)} detalhe={`${fmtInt(comPrevisao)} já com previsão`} />
       </div>
+
+      {progresso !== null && totalVoltas && (
+        <div className="progresso">
+          <label htmlFor="progresso-replay">
+            Replay da corrida: {fmtInt(eventos.length)} de {fmtInt(totalVoltas)} voltas ({progresso}%)
+          </label>
+          <progress id="progresso-replay" max={totalVoltas} value={Math.min(eventos.length, totalVoltas)} />
+        </div>
+      )}
 
       {eventos.length === 0 ? (
         <section className="cartao">

@@ -55,6 +55,13 @@ def test_stream_e_previsto_real(client):
         assert p["erro_s"] == pytest.approx(p["tempo_previsto_s"] - p["duracao_s"], abs=1e-3)
 
 
+def test_replays_trazem_o_total_de_voltas_da_corrida(client):
+    import time
+    time.sleep(0.4)
+    replays = client.get("/api/stream/replays").json()
+    assert replays and all(r["voltas_na_corrida"] >= r["eventos"] > 0 for r in replays)
+
+
 def test_batch_e_stream_separados(client):
     import time
     time.sleep(0.4)

@@ -22,6 +22,7 @@ CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5
 # Dataset.tabela, como nos .sqlx do Dataform.
 T_SESSOES = "f1_silver.silver_sessoes"
 T_PILOTOS = "f1_silver.silver_pilotos"
+T_SILVER_VOLTAS = "f1_silver.silver_voltas"
 T_UNIFICADA = "f1_silver.vw_voltas_unificada"
 T_GOLD_PNEU = "f1_gold.gold_degradacao_pneu"
 T_STREAM = "f1_stream.voltas"

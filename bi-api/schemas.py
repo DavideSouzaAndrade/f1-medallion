@@ -88,6 +88,8 @@ class Replay(BaseModel):
     circuito: Optional[str] = None
     eventos: int
     ultimo_evento: datetime
+    # Voltas que a corrida tem no histórico (Silver): o denominador do progresso do replay.
+    voltas_na_corrida: Optional[int] = None
 
 
 class EventoStream(BaseModel):

@@ -57,9 +57,47 @@ with DAG("f1_saude_pipeline", start_date=datetime(2026, 11, 1), schedule="*/5 * 
     )
 ```
 
-Ordem sugerida na DAG principal: `executar f1-gerador` → `subir Dataflow` →
-`esperar_stream_saudavel` → (parte 3) checar o Cloud Run da API de predição → `drain` do Dataflow
-ao final da demonstração.
+## Disparar o gerador pela DAG
+
+O gerador é o Cloud Run Job `f1-gerador` (região `us-central1`). Argumentos (ver
+`producer/README.md`, branch `parte3/gerador-openf1`):
+
+| Argumento | Efeito |
+|---|---|
+| `--session-key` | corrida a reproduzir (padrão: a mais recente da Bronze; ex.: `11361`) |
+| `--fator` | aceleração do replay (padrão 30: a corrida inteira em ~4 min) |
+| `--minutos N` | só os N primeiros minutos depois da largada (bom para testes) |
+| `--injetar-invalidos F` | fração de cópias quebradas para exercitar a DLQ |
+
+```python
+from airflow.providers.google.cloud.operators.cloud_run import CloudRunExecuteJobOperator
+
+disparar_gerador = CloudRunExecuteJobOperator(
+    task_id="disparar_gerador",
+    project_id="pdm-davi-2026",
+    region="us-central1",
+    job_name="f1-gerador",
+    overrides={"container_overrides": [{"args": ["--session-key", "11361", "--minutos", "5"]}]},
+)
+```
+
+> O nome dos parâmetros do operador depende da versão do provider do Google; confira a que o
+> Airflow do time usa. O gerador não devolve o `replay_id` ao Airflow, então a DAG não deve
+> esperar "o replay X": use o `esperar_stream_saudavel` acima, que olha se **há** evento recente.
+
+## Ordem sugerida na DAG principal
+
+```
+disparar_gerador ─┐
+subir_dataflow ───┴─▶ esperar_stream_saudavel ─▶ checar f1-api (Cloud Run) ─▶ drain_dataflow
+```
+
+1. `subir_dataflow` primeiro ou em paralelo: o job leva ~3 min para o primeiro evento e a
+   assinatura `f1-openf1-dataflow` retém as mensagens, então publicar antes não perde nada.
+2. `esperar_stream_saudavel` (o `HttpSensor` acima) passa quando o último evento do stream tem
+   menos de `max_idade_s` segundos. Enquanto o Dataflow novo não existir, ele falha: é o
+   comportamento certo.
+3. `drain_dataflow` ao final: o job cobra por hora ligado, tenha mensagem ou não.
 
 ## O que o Airflow não precisa fazer pelo front
 
