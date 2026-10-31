@@ -1,125 +1,102 @@
-"""Leitura das voltas de uma corrida na Silver, que e a fonte do replay.
+"""Leitura de uma corrida na Bronze, que e a fonte do replay.
 
-Uma consulta por replay: a corrida inteira tem ~1.000 voltas e a
-silver_voltas e clusterizada por session_key, entao o custo e de poucos MB.
+A Bronze guarda o JSON de cada registro exatamente como a OpenF1 entregou
+(coluna `payload`). O gerador publica esse JSON sem mexer em nenhum campo:
+e isso que faz o replay ser indistinguivel do dado ao vivo.
+
+Uma consulta por replay. As tabelas sao clusterizadas por session_key, entao
+uma corrida (~23 mil registros) le poucos MB.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from google.cloud import bigquery
 
 import config
 
-# Ordem de publicacao: a hora em que a volta TERMINOU, e nao a em que
-# comecou. Um evento "volta concluida" so existe depois da bandeirada de
-# cada volta, e ordenar pelo fim intercala os pilotos como na corrida real.
-# Volta sem data nenhuma vai para o fim, para nao travar o relogio do replay.
+# meetings e sessions sao listas por temporada, sem a coluna session_key: o
+# filtro e pelo conteudo do JSON. Os demais sao particionados por sessao.
 #
-# volta_no_stint precisa ser calculada exatamente como na Gold, que e onde o
-# modelo aprendeu: la ela e o ROW_NUMBER no stint contando so as voltas que
-# passam no filtro de definitions/gold/gold_degradacao_pneu.sqlx. Contar
-# todas as voltas daria a API uma feature diferente da do treino
-# (training-serving skew). `entra_na_gold` replica aquele filtro, so com as
-# condicoes de volta -- as de sessao (corrida, nao teste) valem para a
-# corrida inteira que esta sendo reproduzida.
-#
-# Para uma volta que entra na Gold, o resultado e identico ao da Gold. Para
-# uma que nao entra (saida de box, safety car), e a posicao que ela teria
-# se fosse limpa: as voltas limpas anteriores mais um. Assim o evento nunca
-# chega sem o campo so porque a volta nao seria usada no treino.
-#
-# eh_saida_box e eh_entrada_box sao obrigatorios no contrato. Nulo na Silver
-# significa que a origem nao marcou a volta, e ausencia de marca e "nao".
-_SQL_VOLTAS = """
-WITH voltas AS (
-  SELECT
-    *,
-    COALESCE(
-      stint_valido
-      AND duracao_s IS NOT NULL
-      AND NOT eh_saida_box
-      AND NOT eh_entrada_box
-      AND composto IN ('SOFT', 'MEDIUM', 'HARD')
-      AND idade_pneu IS NOT NULL
-      AND razao_mediana_sessao <= 1.15,
-      FALSE
-    ) AS entra_na_gold
-  FROM `{projeto}.{dataset}.silver_voltas`
-  WHERE session_key = @session_key
+# DISTINCT porque uma sessao reingerida pode ter gravado o mesmo registro
+# duas vezes na Bronze; o replay nao deve publicar a duplicata como se fosse
+# da origem.
+_SQL_REGISTROS = """
+WITH sessao AS (
+  SELECT ANY_VALUE(payload) AS payload
+  FROM `{projeto}.{dataset}.bronze_sessions`
+  WHERE SAFE_CAST(JSON_VALUE(payload, '$.session_key') AS INT64) = @session_key
 )
-SELECT
-  v.session_key,
-  v.driver_number,
-  v.lap_number,
-  s.year,
-  s.circuito,
-  s.circuit_type,
-  v.data_inicio,
-  v.data_fim,
-  v.duracao_s,
-  v.setor_1_s,
-  v.setor_2_s,
-  v.setor_3_s,
-  v.composto,
-  v.stint_number,
-  v.idade_pneu,
-  IF(v.stint_number IS NULL, NULL,
-     1 + COALESCE(SUM(IF(v.entra_na_gold, 1, 0)) OVER (
-       PARTITION BY v.driver_number, v.stint_number
-       ORDER BY v.lap_number
-       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-     ), 0)
-  ) AS volta_no_stint,
-  COALESCE(v.eh_saida_box, FALSE)   AS eh_saida_box,
-  COALESCE(v.eh_entrada_box, FALSE) AS eh_entrada_box,
-  v.gap_medio_a_frente,
-  v.temp_ar,
-  v.temp_pista,
-  v.umidade,
-  v.chuva
-FROM voltas v
-JOIN `{projeto}.{dataset}.silver_sessoes` s USING (session_key)
-ORDER BY
-  COALESCE(v.data_fim, v.data_inicio) IS NULL,
-  COALESCE(v.data_fim, v.data_inicio),
-  v.driver_number
+SELECT 'sessions' AS topico, payload FROM sessao
+UNION ALL
+SELECT 'meetings', ANY_VALUE(m.payload)
+FROM `{projeto}.{dataset}.bronze_meetings` m, sessao s
+WHERE JSON_VALUE(m.payload, '$.meeting_key') = JSON_VALUE(s.payload, '$.meeting_key')
+{por_sessao}
 """
 
+_POR_SESSAO = """UNION ALL
+SELECT DISTINCT '{nome}', payload FROM `{{projeto}}.{{dataset}}.bronze_{nome}` WHERE session_key = @session_key"""
+
 _SQL_CORRIDAS = """
+WITH corridas AS (
+  SELECT
+    SAFE_CAST(JSON_VALUE(payload, '$.session_key') AS INT64) AS session_key,
+    JSON_VALUE(payload, '$.meeting_key')                     AS meeting_key,
+    JSON_VALUE(payload, '$.circuit_short_name')              AS circuito,
+    DATE(SAFE_CAST(JSON_VALUE(payload, '$.date_start') AS TIMESTAMP)) AS data
+  FROM `{projeto}.{dataset}.bronze_sessions`
+  WHERE JSON_VALUE(payload, '$.session_name') = 'Race'
+),
+voltas AS (
+  SELECT session_key, COUNT(*) AS voltas
+  FROM `{projeto}.{dataset}.bronze_laps`
+  GROUP BY 1
+)
 SELECT
-  s.session_key,
-  s.nome_evento,
-  s.circuito,
-  DATE(s.data_inicio_agendada) AS data,
-  COUNT(v.lap_number) AS voltas
-FROM `{projeto}.{dataset}.silver_sessoes` s
-JOIN `{projeto}.{dataset}.silver_voltas` v USING (session_key)
-WHERE s.session_name = 'Race' AND s.tem_dado
-GROUP BY 1, 2, 3, 4
-ORDER BY data DESC
+  c.session_key,
+  ANY_VALUE(JSON_VALUE(m.payload, '$.meeting_name')) AS nome_evento,
+  c.circuito,
+  c.data,
+  v.voltas
+FROM corridas c
+JOIN voltas v USING (session_key)
+LEFT JOIN `{projeto}.{dataset}.bronze_meetings` m
+  ON JSON_VALUE(m.payload, '$.meeting_key') = c.meeting_key
+GROUP BY c.session_key, c.circuito, c.data, v.voltas
+ORDER BY c.data DESC
 LIMIT @limite
 """
 
 
-class FonteSilver:
+class FonteBronze:
     def __init__(self, cliente: bigquery.Client | None = None) -> None:
         self.cliente = cliente or bigquery.Client(project=config.PROJECT_ID)
 
     def _consultar(self, sql: str, parametros: list) -> list[dict[str, Any]]:
-        sql = sql.format(projeto=config.PROJECT_ID, dataset=config.DATASET_SILVER)
+        sql = sql.format(projeto=config.PROJECT_ID, dataset=config.DATASET_BRONZE)
         job = self.cliente.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=parametros))
         return [dict(linha.items()) for linha in job.result()]
 
-    def voltas(self, session_key: int) -> list[dict[str, Any]]:
-        """Todas as voltas da sessao, na ordem em que terminaram."""
-        return self._consultar(
-            _SQL_VOLTAS, [bigquery.ScalarQueryParameter("session_key", "INT64", session_key)]
+    def registros(self, session_key: int) -> dict[str, list[dict[str, Any]]]:
+        """Os registros da corrida por topico, cada um como o JSON da OpenF1."""
+        por_sessao = "\n".join(
+            _POR_SESSAO.format(nome=t) for t in config.TOPICOS if t not in ("meetings", "sessions")
         )
+        linhas = self._consultar(
+            _SQL_REGISTROS.replace("{por_sessao}", por_sessao),
+            [bigquery.ScalarQueryParameter("session_key", "INT64", session_key)],
+        )
+        saida: dict[str, list[dict[str, Any]]] = {t: [] for t in config.TOPICOS}
+        for linha in linhas:
+            if linha["payload"] is not None:
+                saida[linha["topico"]].append(json.loads(linha["payload"]))
+        return saida
 
     def corridas(self, limite: int = 10) -> list[dict[str, Any]]:
-        """Corridas com dado na Silver, da mais recente para a mais antiga."""
+        """Corridas com voltas na Bronze, da mais recente para a mais antiga."""
         return self._consultar(
             _SQL_CORRIDAS, [bigquery.ScalarQueryParameter("limite", "INT64", limite)]
         )

@@ -31,7 +31,7 @@ gcloud run jobs deploy "${JOB_NAME}" \
   --source="${PASTA}" \
   --region="${RUN_REGION}" \
   --service-account="${SA_EMAIL}" \
-  --set-env-vars="PROJECT_ID=${PROJECT_ID},TOPICO=f1-voltas" \
+  --set-env-vars="PROJECT_ID=${PROJECT_ID},TOPICO=f1-openf1" \
   --task-timeout=2h \
   --max-retries=0 \
   --memory=512Mi \
@@ -41,12 +41,12 @@ cat <<EOF
 
 Pronto.
 
-Replay da corrida mais recente, fator 30 (~3 min):
+Replay da corrida mais recente, fator 30 (~4 min):
   gcloud run jobs execute ${JOB_NAME} --region=${RUN_REGION}
 
-Escolhendo corrida, ritmo e eventos invalidos:
+Escolhendo corrida, ritmo e copias invalidas:
   gcloud run jobs execute ${JOB_NAME} --region=${RUN_REGION} \\
-    --args="--session-key,11361,--fator,60,--injetar-invalidos,0.05"
+    --args="--session-key,11361,--fator,60,--injetar-invalidos,0.01"
 
 Acompanhar:
   gcloud run jobs executions list --job=${JOB_NAME} --region=${RUN_REGION}
