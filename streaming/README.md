@@ -313,6 +313,28 @@ A partida a frio não cabe no timeout de leitura de 10 s do pipeline — é por
 isso que a DAG aquece a API **antes** de disparar o gerador, e é por isso
 que o dia da apresentação pede `DEMO=1 bash api/deploy.sh`.
 
+### Rodado pelo Airflow, na nuvem (01/11/2026, 21:11 UTC)
+
+A mesma corrida, disparada pela DAG `f1_pipeline_fim_a_fim` num Airflow
+containerizado numa `e2-medium` do Compute Engine — não da máquina de
+desenvolvimento.
+
+| | |
+|---|---|
+| voltas / `evento_id` distintos | **149 / 149** — zero duplicatas |
+| voltas completas iguais ao lote | **127 / 127** em `duracao_s`, `composto`, `idade_pneu`, `temp_pista` |
+| voltas aptas / aguardando predição | 43 / **0** |
+| erro do modelo (MAE) | 4,09 s, e **1,32 s** na volta de corrida normal |
+| latência mediana / p95 | **5,02 s** / 6,87 s |
+
+As 22 voltas que sobram são a **última de cada piloto**, com `duracao_s` e
+`latencia_ms` nulos. Não é falha: o replay foi cortado em 45 minutos de
+corrida, no meio dessas voltas. O stream grava o que sabe — a volta começou
+e não terminou — e a latência fica nula porque nunca houve `publish_time`
+de versão final para medir contra. São as duas correções do dia visíveis
+juntas: antes do `ABANDONO_S` cair de 600 s para 120 s, essas voltas nem
+eram emitidas, porque o pipeline drenava antes do prazo.
+
 ### Custo
 
 Cada rodada de medição custou cerca de **US$ 0,04**: 1 worker
