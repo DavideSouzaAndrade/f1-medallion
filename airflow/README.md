@@ -229,6 +229,24 @@ com Python 3.10–3.14) e o código do pipeline não depende de versão, mas o
 worker não é o mesmo binário — ao comparar medições, vale conferir de onde o
 job foi lançado.
 
+## Senha da interface
+
+O `init` cria o usuário `admin` com a senha de `AIRFLOW_SENHA`, cujo padrão
+é `admin`. Para trocar:
+
+```bash
+AIRFLOW_SENHA='algo-que-nao-seja-admin' docker compose up -d
+```
+
+Por que o padrão fraco é aceitável **aqui**: a interface nunca está exposta
+na internet. Na VM, chega-se a ela por IAP, que exige autenticação do Google
+e autorização IAM antes de encaminhar qualquer pacote — a senha do Airflow é
+a segunda barreira, não a primeira. Localmente, a porta só escuta em
+`localhost`.
+
+O que **não** se deve fazer é publicar a 8080 numa regra de firewall aberta.
+Aí a senha passa a ser a única barreira, e `admin`/`admin` não é barreira.
+
 ## As DAGs sobem despausadas
 
 O padrão do Airflow é criar DAG pausada. Aqui é `false`: este stack existe
