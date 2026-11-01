@@ -73,5 +73,5 @@ CREATE TABLE IF NOT EXISTS ${self()} (
 PARTITION BY DATE(ts_evento)
 CLUSTER BY session_key, driver_number
 OPTIONS (
-  description = "Voltas recebidas em tempo real pelo Pub/Sub e gravadas pelo Dataflow. Contrato do evento: v1."
+  description = "Voltas montadas pelo Dataflow a partir do dado bruto da OpenF1 recebido no Pub/Sub, com a previsao da API anexada. Mesmo grao da silver_voltas. Contrato das mensagens: v2 (docs/contrato-openf1.md)."
 )

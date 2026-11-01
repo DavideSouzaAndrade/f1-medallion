@@ -103,6 +103,18 @@ O Beam vai num venv **separado**, em `/opt/beam`. Os dois fixam versões de
 os dois. O `subir.sh` já aceita a variável `PYTHON`, e é por ela que o
 compose aponta para esse venv.
 
+Verificado dentro da imagem: `gcloud` 591, Beam 2.77 no venv, e o Python do
+Airflow **não** vê o Beam (`ModuleNotFoundError`) — que é o ponto do
+isolamento.
+
+**Uma diferença a conhecer:** a imagem base do Airflow é Python 3.11, então
+o venv do Beam é 3.11 e o Dataflow usa a imagem de worker
+`beam_python3.11_sdk`. Lançando pelo venv do repositório, em 3.14, ele usa a
+`beam_python3.14_sdk`. As duas são suportadas (Dataflow aceita Beam 2.73–2.77
+com Python 3.10–3.14) e o código do pipeline não depende de versão, mas o
+worker não é o mesmo binário — ao comparar medições, vale conferir de onde o
+job foi lançado.
+
 ## Connections
 
 As duas vêm por variável de ambiente, então não há nada a configurar na

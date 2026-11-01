@@ -246,32 +246,78 @@ tenta primeiro o Prism, que não implementa leitura de Pub/Sub: ele falha,
 loga um traceback e só então volta para o runner Python. Pedir o
 `BundleBased` direto pula o desvio.
 
-## Resultados medidos (19/10/2026)
+## Resultados medidos (01/11/2026)
 
-**Local, DirectRunner** — fila de 106 eventos acumulada pelo gerador:
+Corrida 11361 (GP da Itália 2026), 45 minutos de replay no fator 30, 3.637
+mensagens, 1% corrompidas de propósito.
 
-| Medida | Valor |
+### Corretude — comparado volta a volta com a `silver_voltas`
+
+| coluna | voltas iguais ao lote |
+|---|---:|
+| `duracao_s` | **127/127** |
+| `composto` | **127/127** |
+| `idade_pneu` | **127/127** |
+| `temp_pista` | **127/127** |
+| `gap_medio_a_frente` | **127/127** |
+| `eh_saida_box` | **127/127** |
+| `data_inicio` | **127/127** |
+| `eh_entrada_box` | 106/127 |
+
+| | |
 |---|---|
-| Eventos processados | 106 — nenhum perdido |
-| Gravados em `voltas` | 85, sendo 81 aptos ao modelo |
-| Rejeitados para a DLQ | 21, cobrindo os **6** tipos injetados |
-| `evento_id` duplicado | nenhum |
-| Linhas sem `_ts_processamento` | nenhuma |
+| linhas / `evento_id` distintos | **127 / 127** — zero duplicatas |
+| voltas sem contexto da sessão | 0 |
+| DLQ | 40, exatamente as 40 injetadas, nos 4 motivos do contrato |
 
-As 4 voltas inaptas chegaram sem composto, duração e idade de pneu: foram
-gravadas mesmo assim e marcadas, como manda o contrato.
+As 21 divergências de `eh_entrada_box` não têm correção: esta corrida teve
+bandeira vermelha na volta 3, e os registros de `v1/pit` dessas paradas têm
+data **2.137 s depois da largada** — meia hora depois da volta terminar. Ao
+vivo é impossível saber. É o argumento para a DAG de reprocessamento em
+lote existir.
 
-**No Dataflow** — 1 worker `e2-standard-2`, Streaming Engine:
+### Latência
 
-| Medida | Valor |
+Do `publish_time` da versão final da volta no Pub/Sub até a linha gravada no
+BigQuery, incluindo a chamada à API de predição.
+
+| | M4 local (`DirectRunner`) | **Dataflow + Streaming Engine** |
+|---|---:|---:|
+| mínimo | 4,10 s | **2,68 s** |
+| mediana | ~60 s | **4,60 s** |
+| p95 | 97,0 s | 8,22 s |
+| máximo | 99,0 s | 8,87 s |
+
+O `DirectRunner` é um processo único que intercala processar elementos e
+disparar timers; enquanto mastiga uma rajada de 1.325 `intervals`, o timer
+que devia disparar em 3 s dispara 60 s depois. O Streaming Engine mantém
+estado e timers fora do worker e os dispara no prazo.
+
+**E ele não foi só mais rápido: foi mais correto.** A corretude da montagem
+depende da carência ser maior que o atraso de reordenação, e com o runner
+lento o atraso que importa passa a ser o da fila interna dele. No
+`DirectRunner` o mesmo replay deu 110/118 em `temp_pista` e 105/118 em
+`gap`. Detalhe em
+[docs/caso-carencia-reordenacao.md](../docs/caso-carencia-reordenacao.md).
+
+### Predição
+
+| | |
 |---|---|
-| Partida a frio até o primeiro evento gravado | ~3 min (provisionar VM e instalar dependências) |
-| Latência com o job quente — mediana | **2,2 s** |
-| p95 / máximo | 2,7 s / 2,8 s |
-| Mínimo observado | 117 ms |
-| Eventos do segundo lote | 72 publicados, 72 gravados (60 voltas + 12 DLQ) |
+| latência da API quente | 260–344 ms |
+| partida a frio | 37 s de container (33 s carregando o SavedModel), e o Cloud Run levou mais de 1 min só para alocar instância |
+| erro em volta de corrida normal | **1,32 s** sobre 88,5 s (1,5%) |
+| erro na volta de largada parada | 6,73 s |
 
-A latência é o `latencia_ms` da própria tabela: do `publish` no Pub/Sub à
-linha no BigQuery. O primeiro lote depois de uma partida a frio carrega o
-tempo de boot do worker — para uma demonstração, suba o job alguns minutos
-antes de publicar.
+A partida a frio não cabe no timeout de leitura de 10 s do pipeline — é por
+isso que a DAG aquece a API **antes** de disparar o gerador, e é por isso
+que o dia da apresentação pede `DEMO=1 bash api/deploy.sh`.
+
+### Custo
+
+Cada rodada de medição custou cerca de **US$ 0,04**: 1 worker
+`e2-standard-2` por ~20 minutos, mais Streaming Engine e inserções no
+BigQuery. O gerador é um Cloud Run Job e escala a zero.
+
+O drain leva de 2 a 12 minutos (o Dataflow reavalia o estado a cada 10) e a
+cobrança só termina quando as VMs saem — por isso a DAG espera.

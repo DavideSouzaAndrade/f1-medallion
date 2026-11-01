@@ -62,6 +62,16 @@ RAIZ = os.environ.get("F1_RAIZ", "/opt/f1-medallion")
 # pipeline.
 PREFIXO_JOB = "f1-openf1-"
 
+# Espaco no fim de todo bash_command que termina em .sh.
+#
+# Nao e enfeite: BashOperator.template_ext inclui ".sh", e o Airflow trata
+# um bash_command terminado em .sh como CAMINHO DE ARQUIVO de template, nao
+# como comando. Sem o espaco, a tarefa morre no carregamento com
+# "jinja2.exceptions.TemplateNotFound: cd /opt/f1-medallion && bash
+# streaming/subir.sh". E o workaround que a propria documentacao do Airflow
+# recomenda -- nao remova.
+FIM = " "
+
 SESSAO = "{{ dag_run.conf.get('session_key', '11361') }}"
 MINUTOS = "{{ dag_run.conf.get('minutos', '45') }}"
 INVALIDOS = "{{ dag_run.conf.get('injetar_invalidos', '0.01') }}"
@@ -112,7 +122,7 @@ with DAG(
     # importa (dois jobs na mesma assinatura = cobranca dobrada).
     subir_dataflow = BashOperator(
         task_id="subir_dataflow",
-        bash_command=f"cd {RAIZ} && bash streaming/subir.sh",
+        bash_command=f"cd {RAIZ} && bash streaming/subir.sh{FIM}",
         # append_env e nao env puro: o env do BashOperator SUBSTITUI o
         # ambiente, e sem ele o subir.sh perderia PYTHON (o venv do Beam),
         # PATH (o gcloud) e as credenciais.
@@ -178,7 +188,7 @@ with DAG(
     # permite a proxima execucao subir sem esbarrar num job ainda ativo.
     drenar_dataflow = BashOperator(
         task_id="drenar_dataflow",
-        bash_command=f"cd {RAIZ} && ESPERAR=1 bash streaming/parar.sh",
+        bash_command=f"cd {RAIZ} && ESPERAR=1 bash streaming/parar.sh{FIM}",
         env={"PROJECT_ID": PROJETO, "REGIAO": REGIAO},
         append_env=True,
         trigger_rule=TriggerRule.ALL_DONE,
