@@ -12,23 +12,25 @@ import os
 PROJECT_ID = os.environ.get("PROJECT_ID", "pdm-davi-2026")
 
 # Destino: o topico criado por setup/setup_streaming.sh.
-TOPICO = os.environ.get("TOPICO", "f1-voltas")
+TOPICO = os.environ.get("TOPICO", "f1-openf1")
 
-# Origem do replay: a Silver do batch. O gerador le daqui e publica como se
-# a corrida estivesse acontecendo agora.
-DATASET_SILVER = os.environ.get("DATASET_SILVER", "f1_silver")
+# Origem do replay: a Bronze, que guarda cada registro exatamente como a
+# OpenF1 entregou. O gerador le daqui e publica como se a corrida estivesse
+# acontecendo agora.
+DATASET_BRONZE = os.environ.get("DATASET_BRONZE", "f1_bronze")
 
-# Versao do contrato do evento. Vai como atributo da mensagem para que o
-# Dataflow saiba qual schema esperar sem abrir o corpo.
-SCHEMA_VERSION = "1"
+# Os endpoints que a silver_voltas usa, na ordem em que saem quando duas
+# mensagens caem no mesmo instante: o contexto (evento, sessao, pneu) antes
+# da volta que depende dele.
+TOPICOS = ("meetings", "sessions", "weather", "stints", "pit", "intervals", "laps")
 
 # --- ritmo do replay ---------------------------------------------------------
 
 # Quantas vezes mais rapido que a corrida real. Uma corrida de ~80 min com
-# fator 30 vira ~3 min de eventos: cabe na demonstracao ao vivo.
+# fator 30 vira ~3 min de mensagens: cabe na demonstracao ao vivo.
 FATOR_PADRAO = float(os.environ.get("FATOR", "30"))
 
-# Teto para a espera entre dois eventos. Bandeira vermelha para a corrida
+# Teto para a espera entre duas mensagens. Bandeira vermelha para a corrida
 # por 30 min ou mais; sem teto, o replay ficaria minutos parado no meio da
 # apresentacao.
 PAUSA_MAXIMA_S = float(os.environ.get("PAUSA_MAXIMA_S", "2"))

@@ -21,8 +21,9 @@ BATCH — histórico e treino (parte 1)
     → f1_bronze → f1_silver → f1_gold → BigQuery ML (2 modelos)
 
 STREAMING — voltas em tempo real (parte 2)
-  Cloud Run Job f1-gerador → Pub/Sub f1-voltas → Dataflow → f1_stream.voltas
-                                                          └→ f1_stream.voltas_dlq (rejeitados)
+  Cloud Run Job f1-gerador → Pub/Sub f1-openf1 → Dataflow → f1_stream.voltas
+  (replay da Bronze no         (mensagens brutas)          └→ f1_stream.voltas_dlq (rejeitados)
+   formato da OpenF1 ao vivo)
   f1_silver.vw_voltas_unificada = silver_voltas (batch) ∪ f1_stream.voltas (stream)
 
 SERVING — predição sob demanda (parte 2)
@@ -34,10 +35,13 @@ O batch guarda o histórico e treina o modelo; o streaming traz as voltas
 novas; a view unificada é onde os dois se encontram, com a coluna `origem`
 dizendo o caminho de cada volta.
 
-O Dataflow é a peça do meio do streaming: um job Apache Beam que fica de pé
-consumindo a assinatura, valida cada evento contra o contrato v1, marca o que
-serve ao modelo e grava — a volta boa em `f1_stream.voltas`, a rejeitada em
-`f1_stream.voltas_dlq` com o motivo.
+O gerador publica as mensagens exatamente como a OpenF1 entrega ao vivo, um
+registro bruto por mensagem; trocá-lo pela OpenF1 de verdade não muda nada
+para quem consome.
+
+> **[A ATUALIZAR — frente B]** Papel do Dataflow sobre as mensagens brutas:
+> montar a volta a partir de laps, stints, weather, intervals e pit e gravar
+> no formato do contrato v1.
 
 ---
 
@@ -62,7 +66,9 @@ serve ao modelo e grava — a volta boa em `f1_stream.voltas`, a rejeitada em
 | [docs/perfil-dados-bronze.md](docs/perfil-dados-bronze.md) | Campo a campo dos 18 endpoints na Bronze e a proposta de estrutura da Silver |
 | [docs/analise-exploratoria.md](docs/analise-exploratoria.md) | Qualidade dos dados medida na Bronze e a decisão de tratamento que cada achado implica |
 | [docs/ingestao-incremental.md](docs/ingestao-incremental.md) | Como a ingestão se atualiza com as corridas novas sem varrer tudo |
-| [docs/contrato-evento.md](docs/contrato-evento.md) | Formato do evento de volta no Pub/Sub: campos, tipos e o que vai para a DLQ |
+| [docs/contrato-openf1.md](docs/contrato-openf1.md) | Mensagens no Pub/Sub: o formato da OpenF1 ao vivo, as versões de cada registro e o que o dado bruto traz de defeito |
+| [docs/contrato-evento.md](docs/contrato-evento.md) | A volta montada pelo Dataflow: campos e regras do que é gravado em `f1_stream.voltas` |
+| [docs/registro-gerador-openf1.md](docs/registro-gerador-openf1.md) | O que mudou no gerador, no Pub/Sub e nos contratos no início da parte 3, e o que o novo Dataflow precisa fazer |
 | [docs/plano-frente-b.md](docs/plano-frente-b.md) | Plano e decisões do pipeline Dataflow: desenho, ordem da validação e custo |
 
 ---
