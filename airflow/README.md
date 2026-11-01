@@ -125,6 +125,11 @@ Duas armadilhas que esse caminho revelou e que estão resolvidas no script:
 - **O container roda como uid 50000** e o repositório baixado é do root. O
   Beam escreve o `egg-info` no diretório do `streaming/setup.py` ao
   empacotar o job, então o script faz `chown -R 50000:0` no repositório.
+- **Um volume nomeado herda dono do diretório correspondente na imagem.** O
+  `~/.config/gcloud` não existia na imagem oficial, então o Docker criava o
+  volume como root e o `gcloud` do container ficava sem identidade nenhuma —
+  com o servidor de metadados respondendo — porque não conseguia escrever
+  `credentials.db`. O `Dockerfile` cria o diretório com o dono certo.
 
 **Desligar entre as demonstrações** — é isso que faz o custo ser de dólares
 e não de dezenas:

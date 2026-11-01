@@ -40,6 +40,18 @@ RUN python -m venv /opt/beam \
  && /opt/beam/bin/pip install --no-cache-dir -r /tmp/beam-requirements.txt \
  && chown -R airflow: /opt/beam
 
+# O diretorio de configuracao do gcloud, com o dono certo.
+#
+# Nao e detalhe: o compose monta um volume nomeado aqui, e um volume nomeado
+# herda dono e permissoes do diretorio CORRESPONDENTE NA IMAGEM. Se o
+# diretorio nao existe, o Docker o cria como root -- e o container roda como
+# uid 50000, entao o gcloud falha com
+# "Permission denied: /home/airflow/.config/gcloud/credentials.db" e fica
+# sem identidade nenhuma, mesmo com o servidor de metadados respondendo.
+RUN mkdir -p /home/airflow/.config/gcloud \
+ && chown -R 50000:0 /home/airflow/.config \
+ && chmod -R u+rwX /home/airflow/.config
+
 USER airflow
 
 # Os providers que as DAGs importam. Vem na imagem oficial, mas fixar aqui
