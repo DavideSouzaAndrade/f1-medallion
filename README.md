@@ -55,6 +55,8 @@ para quem consome.
 ├── streaming/     pipeline Dataflow: Pub/Sub → validação → BigQuery, com DLQ
 ├── model/         exportação e avaliação do modelo
 ├── api/           API de predição no Cloud Run
+├── bi-api/        API de BI: serve o BigQuery e o stream (SSE) ao front
+├── bi-frontend/   front-end analítico (React): histórico, ao vivo, previsto × real
 ├── setup/         provisionamento do GCP (batch e streaming)
 └── docs/          documentação de apoio (ver abaixo)
 ```
@@ -116,6 +118,14 @@ curl -X POST https://f1-api-418113305910.us-central1.run.app/predict \
   -d '{"instancias": [{"composto": "MEDIUM", "idade_pneu": 20, "volta_no_stint": 20,
        "volta_corrida": 23, "gap_medio_a_frente": 3.328, "temp_pista": 53.8,
        "temp_ar": 32.4, "umidade": 37.5, "circuito": "Monza", "circuit_type": "Permanent"}]}'
+```
+
+**Front-end de BI** — [bi-api/README.md](bi-api/README.md) · [bi-frontend/README.md](bi-frontend/README.md)
+
+```bash
+cd bi-api && MOCK=1 uvicorn main:app --port 8080    # sem GCP, dados simulados
+cd bi-frontend && npm install && npm run dev         # http://localhost:5173
+bash bi-api/deploy.sh && bash bi-frontend/deploy.sh  # Cloud Run
 ```
 
 ---
