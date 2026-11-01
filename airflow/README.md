@@ -193,6 +193,18 @@ com Python 3.10–3.14) e o código do pipeline não depende de versão, mas o
 worker não é o mesmo binário — ao comparar medições, vale conferir de onde o
 job foi lançado.
 
+## As DAGs sobem despausadas
+
+O padrão do Airflow é criar DAG pausada. Aqui é `false`: este stack existe
+para rodar exatamente estas duas. Com elas pausadas, subir o Airflow e
+disparar **não faz nada** — a execução fica `queued` em silêncio, sem erro
+nenhum e sem log que explique. Se acontecer, é isto:
+
+```bash
+docker compose exec -T scheduler airflow dags unpause f1_pipeline_fim_a_fim
+docker compose exec -T scheduler airflow dags unpause f1_saude_pipeline
+```
+
 ## Connections
 
 As duas vêm por variável de ambiente, então não há nada a configurar na

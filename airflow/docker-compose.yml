@@ -32,7 +32,12 @@ x-airflow-comum: &airflow-comum
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    # false, e nao o padrao true: este stack existe para rodar exatamente
+    # estas duas DAGs. Com elas pausadas, subir o Airflow e disparar nao faz
+    # nada -- a execucao fica "queued" em silencio, sem erro nenhum, e levei
+    # quatro minutos para entender que nao era lentidao. Numa apresentacao
+    # seria pior.
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
     # Uma execucao da DAG principal sobe um job que cobra por hora: duas em
     # paralelo seria cobranca dobrada na mesma assinatura.
     AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "1"
