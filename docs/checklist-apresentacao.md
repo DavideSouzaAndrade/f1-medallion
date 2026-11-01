@@ -140,6 +140,12 @@ Lista vazia = ninguém pagando. Se tiver algo:
 
 ### Antes de começar a falar
 
+**Desligar a VPN, se estiver usando.** Em 01/11 uma VPN ativa quebrou a
+resolução de `github.com`, `dl.google.com` e `tunnel.cloudproxy.app`, e os
+erros aparecem como falhas de permissão ou de serviço — cinco vezes, até
+descobrirmos a causa. Num palco isso custaria minutos preciosos.
+
+
 ```bash
 # nada de pé do dia anterior
 gcloud dataflow jobs list --region=us-central1 --status=active
@@ -191,7 +197,7 @@ gcloud dataflow jobs list --region=us-central1 --status=active   # tem que vir v
 | nenhuma volta chegando | job do Dataflow não está consumindo | `gcloud dataflow jobs list --region=us-central1 --status=active` |
 | `subir_dataflow` falha com "já existe job ativo" | sobrou job da véspera | `ESPERAR=1 bash streaming/parar.sh` e disparar de novo |
 | DLQ com muita coisa | normal: o gerador injeta 1% de propósito | mostrar como recurso, não como defeito |
-| `Could not resolve host` / `NameResolutionError` | **a rede, não o projeto** | repetir o comando; aconteceu duas vezes em 01/11 e passou sozinho |
+| `Could not resolve host` / `NameResolutionError` / `nodename nor servname provided` | **DNS, não o projeto** — em 01/11 a causa foi uma **VPN ativa** | desligar a VPN. Testar com `python3 -c "import socket; print(socket.gethostbyname('"'"'github.com'"'"'))"` |
 
 **A carta na manga:** se o ao vivo falhar, o BigQuery tem as execuções
 anteriores. `SELECT ... FROM f1_stream.voltas WHERE tempo_previsto_s IS NOT

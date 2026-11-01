@@ -110,9 +110,14 @@ Se o túnel falhar com `PERMISSION_DENIED`, falta
 `roles/iap.tunnelResourceAccessor` — essa é **no projeto**, então o dono do
 projeto concede.
 
-Se falhar com `[Errno 8] nodename nor servname provided`, é **DNS da sua
-rede**, não o IAP: aconteceu quatro vezes em 01/11 e passou sozinho.
-Repetir resolve.
+Se falhar com `[Errno 8] nodename nor servname provided`, é **DNS, não o
+IAP** — e a causa encontrada em 01/11 foi uma **VPN ativa**, que quebrava a
+resolução de `tunnel.cloudproxy.app`, `github.com` e `dl.google.com`.
+Desligar a VPN resolveu. Antes de investigar permissão, teste:
+
+```bash
+python3 -c "import socket; print(socket.gethostbyname('tunnel.cloudproxy.app'))"
+```
 
 ### Provisionamento sem SSH
 
