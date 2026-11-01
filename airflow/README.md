@@ -234,6 +234,23 @@ com Python 3.10–3.14) e o código do pipeline não depende de versão, mas o
 worker não é o mesmo binário — ao comparar medições, vale conferir de onde o
 job foi lançado.
 
+## Sessão da interface sobrevivendo a reinício
+
+A chave que assina o cookie de sessão não está no repositório — segredo em
+repositório público não é segredo. Por padrão o Airflow gera uma na subida,
+e o custo é que **ela muda a cada reinício do webserver, derrubando quem
+estava logado**. Com `restart: unless-stopped` isso acontece sozinho.
+
+Para a sessão sobreviver, defina antes do `up`:
+
+```bash
+export AIRFLOW_SECRET_KEY="$(openssl rand -hex 32)"
+docker compose up -d
+```
+
+Vale fazer isso na véspera da apresentação: cair da sessão no meio da demo é
+um susto evitável.
+
 ## Consultar o estado sem abrir a interface
 
 A API REST está habilitada com basic auth, então o estado de uma DAG é uma

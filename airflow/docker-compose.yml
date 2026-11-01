@@ -52,6 +52,16 @@ x-airflow-comum: &airflow-comum
     # chega-se por IAP, que autentica antes de encaminhar, e localmente ela
     # so escuta em localhost. Ainda assim, troque AIRFLOW_SENHA.
     AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
+    # Chave que assina o cookie de sessao da interface. Vazia por padrao: o
+    # Airflow gera uma na subida, e NADA e commitado -- segredo em
+    # repositorio publico nao e segredo.
+    #
+    # O custo de deixar gerar: a chave muda a cada reinicio do webserver, e
+    # quem estava logado cai. Com restart: unless-stopped isso acontece
+    # sozinho. Para a sessao sobreviver, defina antes do up:
+    #
+    #   export AIRFLOW_SECRET_KEY="$(openssl rand -hex 32)"
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-}
     # Onde o repositorio aparece dentro do container; a DAG usa isto para
     # achar o streaming/subir.sh.
     F1_RAIZ: /opt/f1-medallion
