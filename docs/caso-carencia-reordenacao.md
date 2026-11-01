@@ -313,3 +313,34 @@ que não entrou na amostra nem o contrário.
 - **Amostra estatística ao vivo precisa se defender do próprio dado.** A
   mediana corrente parecia a tradução óbvia da mediana da sessão, e era —
   até a corrida ter quatro voltas anormais em seis.
+
+## A simplificação que os números pediram
+
+Depois de corrigir a mediana, rodei a consulta que o painel de BI do Davi
+usa. Ela reportou `aguardando_predicao = 43` de 106 voltas aptas — 40% do
+painel marcado como "predição pendente", com o pipeline funcionando
+perfeitamente.
+
+A causa não era um bug: era uma modelagem errada minha. Eu tinha duas noções
+separadas — `apto_modelo` ("a volta serve ao modelo") e uma marca interna de
+volta anômala ("a volta está dentro da faixa") — e passava a segunda à
+predição por um campo auxiliar que viajava com a linha e era removido antes
+da escrita.
+
+Mas a `gold_degradacao_pneu` **não separa as duas**. O filtro dela é único:
+composto seco, campos presentes, fora do box **e** dentro de 1,15× a
+mediana. Uma volta de safety car não é "apta mas excluída" — ela simplesmente
+não é apta, porque o modelo nunca viu uma.
+
+Unificar consertou três coisas e removeu código:
+
+| | antes | depois |
+|---|---|---|
+| volta sem previsão | "excluída de propósito" **ou** "API falhou", indistinguíveis | só "API falhou" |
+| `volta_no_stint` | numerava um conjunto diferente do da Gold | numera o mesmo conjunto |
+| campo auxiliar entre montagem e predição | existia | deixou de existir |
+
+A lição é de modelagem, não de código: **duas condições que a fonte da
+verdade trata como uma só não devem ser separadas a jusante.** O sintoma
+apareceu como um número estranho no painel de outra pessoa, três camadas
+depois de onde estava a causa.

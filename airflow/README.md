@@ -113,7 +113,13 @@ interface:
 | `f1_api` | aquecer e vigiar a API do modelo | `AIRFLOW_CONN_F1_API` |
 | `f1_bi_api` | as checagens de saúde do Davi | `AIRFLOW_CONN_F1_BI_API` |
 
-Os padrões apontam para os serviços atuais; sobrescreva se as URLs mudarem.
+Os padrões apontam para os serviços atuais. Para mudar, defina
+`F1_API_URL` e `F1_BI_API_URL` antes do `docker compose up`.
+
+As duas vão no **formato JSON**, e não como URI. O Airflow interpreta
+`AIRFLOW_CONN_*` como URI quando o valor não começa com chave, e aí
+`https://host` viraria `conn_type=https` — que o `HttpHook` não reconhece,
+e o sensor falharia com um erro que não aponta para a causa.
 
 ## A ordem das tarefas, e por que ela é essa
 
@@ -148,6 +154,12 @@ provisionamento de VM e instalação de dependências.
 **`drenar_dataflow` com `trigger_rule=ALL_DONE`.** Se qualquer tarefa acima
 falhar, o job ficaria de pé cobrando. É a única tarefa da DAG que roda
 mesmo quando o resto falha.
+
+Ela usa `ESPERAR=1` e só conclui quando não há mais worker ligado. O drain
+não é instantâneo: medido, o Dataflow reavalia o estado do job a cada 10
+minutos, e a cobrança só termina quando as VMs saem. Com a espera, "a DAG
+terminou" significa "paramos de pagar" — e a execução seguinte não esbarra
+num job ainda ativo.
 
 ## Parâmetros da execução
 

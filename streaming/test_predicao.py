@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from montagem import AUXILIAR_ANOMALA, CAMPOS_DA_TABELA
+from montagem import CAMPOS_DA_TABELA
 from predicao import (
     COMPOSTOS_DO_MODELO, TIPOS_DE_CIRCUITO, Predizer, instancia, pode_prever,
 )
@@ -59,11 +59,6 @@ confere("sem idade_pneu nao vai", pode_prever(volta(idade_pneu=None)) is False)
 confere("gap nulo ainda vai (a API troca por 99.0)",
         pode_prever(volta(gap_medio_a_frente=None)) is True)
 
-# Volta anomala (safety car, bandeira): o modelo nao foi treinado nela.
-confere("volta anomala nao vai a API",
-        pode_prever(volta(**{AUXILIAR_ANOMALA: True})) is False)
-confere("volta nao anomala vai",
-        pode_prever(volta(**{AUXILIAR_ANOMALA: False})) is True)
 
 # Os conjuntos tem que ser os mesmos do api/main.py.
 confere("compostos do modelo sao os tres secos",
@@ -161,9 +156,14 @@ confere("a volta inapta sai sem previsao",
 confere("a volta inapta sai sem versao de modelo",
         por_volta[1]["modelo_versao"] is None)
 
-# --- a volta anomala atravessa, so sem previsao -----------------------------
+# --- a volta anomala nem chega aqui como apta -------------------------------
+#
+# O corte de 1,15x a mediana da sessao ja esta dentro de apto_modelo
+# (montagem.eh_apto_para_modelo), entao a volta sob safety car chega com
+# apto_modelo falso e segue o caminho de qualquer inapta: gravada, sem
+# previsao, sem chamada a API.
 
-lote = [volta(lap_number=10), volta(lap_number=11, **{AUXILIAR_ANOMALA: True})]
+lote = [volta(lap_number=10), volta(lap_number=11, duracao_s=145.0, apto_modelo=False)]
 resposta = RespostaFalsa({"modelo": "m@v1", "predicoes": [{"tempo_previsto_s": 86.4}]})
 saida, sessao = rodar(lote, SessaoFalsa(resposta))
 por_volta = {l["lap_number"]: l for l in saida}
@@ -171,14 +171,10 @@ por_volta = {l["lap_number"]: l for l in saida}
 confere("a API recebeu so a volta normal",
         len(sessao.chamadas[0]["corpo"]["instancias"]) == 1)
 confere("a volta normal recebe previsao", por_volta[10]["tempo_previsto_s"] == 86.4)
-confere("a volta anomala e gravada sem previsao",
+confere("a volta de safety car e gravada sem previsao",
         por_volta[11]["tempo_previsto_s"] is None)
-confere("a volta anomala conserva a duracao real", por_volta[11]["duracao_s"] == 85.3)
-
-# A auxiliar nao pode chegar ao BigQuery: campo fora do schema derruba a
-# linha inteira. Quem a remove e o pipeline, com as colunas da tabela.
-confere("a auxiliar sai da linha ao projetar as colunas da tabela",
-        AUXILIAR_ANOMALA not in {campo: None for campo in CAMPOS_DA_TABELA})
+confere("a volta de safety car conserva a duracao real",
+        por_volta[11]["duracao_s"] == 145.0)
 confere("tempo_previsto_s e modelo_versao SAO colunas da tabela",
         "tempo_previsto_s" in CAMPOS_DA_TABELA and "modelo_versao" in CAMPOS_DA_TABELA)
 

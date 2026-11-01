@@ -23,11 +23,11 @@ Cuidados que a rede impoe num pipeline de streaming:
 - so a volta apta vai a API. O modelo conhece tres compostos secos e tres
   tipos de circuito; mandar uma volta de chuva renderia 422 e, num lote,
   derrubaria a predicao das outras voltas junto.
-- a volta anomala tambem fica fora. A gold_degradacao_pneu treina so com
-  volta dentro de 1,15x a mediana da sessao, e prever uma volta sob safety
-  car daria dezenas de segundos de erro -- medido: 54,98 s na volta de
-  bandeira vermelha, contra 1,32 s na volta de corrida normal. A volta entra
-  no BigQuery, apenas sem previsao.
+- a volta anomala tambem fica fora, e isso ja vem decidido no apto_modelo:
+  ele carrega o recorte inteiro da gold_degradacao_pneu, inclusive o corte
+  de 1,15x a mediana da sessao. Prever uma volta sob safety car daria
+  dezenas de segundos de erro -- medido: 54,98 s na volta de bandeira
+  vermelha, contra 1,32 s na volta de corrida normal.
 """
 
 from __future__ import annotations
@@ -38,8 +38,6 @@ from typing import Any
 
 import apache_beam as beam
 from apache_beam.metrics import Metrics
-
-from montagem import AUXILIAR_ANOMALA
 
 log = logging.getLogger("predicao")
 
@@ -74,11 +72,10 @@ def pode_prever(linha: dict[str, Any]) -> bool:
     volta_no_stint ausente) sao casos em que a volta entra no BigQuery sem
     previsao em vez de derrubar o lote inteiro com 422.
     """
+    # apto_modelo ja carrega o recorte inteiro da gold_degradacao_pneu,
+    # inclusive o corte de 1,15x a mediana da sessao: a volta sob safety car
+    # nao chega aqui como apta.
     if not linha.get("apto_modelo"):
-        return False
-    # Fora da faixa de volta aproveitavel da sessao: o modelo nao foi
-    # treinado nela. Quem marca e a montagem, pela mediana corrente.
-    if linha.get(AUXILIAR_ANOMALA):
         return False
     if linha.get("composto") not in COMPOSTOS_DO_MODELO:
         return False
@@ -115,7 +112,6 @@ class Predizer(beam.DoFn):
         self.previstas = Metrics.counter("f1", "voltas_previstas")
         self.sem_previsao = Metrics.counter("f1", "voltas_sem_previsao")
         self.falhas = Metrics.counter("f1", "falhas_da_api")
-        self.anomalas = Metrics.counter("f1", "voltas_anomalas")
         self.sessao = None
 
     def setup(self) -> None:
@@ -148,7 +144,6 @@ class Predizer(beam.DoFn):
 
     def process(self, lote: list[dict[str, Any]]):
         aptas = [linha for linha in lote if pode_prever(linha)]
-        self.anomalas.inc(sum(1 for l in lote if l.get(AUXILIAR_ANOMALA)))
         if not aptas:
             self.sem_previsao.inc(len(lote))
             yield from lote

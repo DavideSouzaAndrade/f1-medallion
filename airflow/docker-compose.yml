@@ -47,8 +47,17 @@ x-airflow-comum: &airflow-comum
     REGIAO: ${REGIAO:-us-central1}
     # As duas connections HTTP que as DAGs esperam, por variavel de
     # ambiente: evita configurar nada a mao na interface.
-    AIRFLOW_CONN_F1_API: ${AIRFLOW_CONN_F1_API:-https://f1-api-ytz2c7b2wq-uc.a.run.app}
-    AIRFLOW_CONN_F1_BI_API: ${AIRFLOW_CONN_F1_BI_API:-https://f1-bi-api-ytz2c7b2wq-uc.a.run.app}
+    #
+    # No formato JSON, e nao como URI. O Airflow le AIRFLOW_CONN_* como URI
+    # quando o valor nao comeca com chave, e ai "https://host" viraria
+    # conn_type=https -- que o HttpHook nao reconhece. Com JSON o conn_type
+    # fica explicito e o host leva o esquema.
+    AIRFLOW_CONN_F1_API: >-
+      {"conn_type": "http",
+       "host": "${F1_API_URL:-https://f1-api-ytz2c7b2wq-uc.a.run.app}"}
+    AIRFLOW_CONN_F1_BI_API: >-
+      {"conn_type": "http",
+       "host": "${F1_BI_API_URL:-https://f1-bi-api-ytz2c7b2wq-uc.a.run.app}"}
   volumes:
     - ./dags:/opt/airflow/dags:ro
     - ./logs:/opt/airflow/logs

@@ -100,6 +100,20 @@ provisiona a VM e instala as dependências.
 como o Cloud Run. O `parar.sh` usa `drain`, que para de ler a assinatura e
 deixa terminar o que está em voo.
 
+**O drain não é instantâneo.** Medido: o Dataflow reavalia o estado do job a
+cada 10 minutos — o log do worker diz literalmente *"Job is in state
+JOB_STATE_DRAINING, will check again in 10m0s"* — e a cobrança só termina
+quando as VMs são liberadas. Dois caminhos:
+
+```bash
+bash streaming/parar.sh             # pede o drain e sai
+ESPERAR=1 bash streaming/parar.sh   # pede e espera o job sumir da lista
+MODO=cancel bash streaming/parar.sh # mata na hora, para o que não pode esperar
+```
+
+A DAG usa `ESPERAR=1`, para que "a DAG terminou" signifique "paramos de
+pagar" — e para que a execução seguinte não esbarre num job ainda ativo.
+
 Com o job parado, as mensagens ficam retidas 7 dias na assinatura e são
 consumidas quando ele voltar.
 
@@ -212,6 +226,15 @@ outro id.
 saíram, então uma reentrega tardia não grava uma segunda linha. É um
 conjunto e não uma marca d'água: com marca d'água, uma volta que saísse fora
 de ordem barraria todas as anteriores, e elas se perderiam em silêncio.
+
+**`apto_modelo` é o recorte inteiro da Gold, inclusive o corte de 1,15x a
+mediana.** Separar "apta ao modelo" de "dentro da faixa" foi um erro: a
+`gold_degradacao_pneu` trata o filtro como um só, e o modelo nunca viu uma
+volta de safety car. Unificar consertou três coisas de uma vez — a volta sem
+previsão passou a ser só a que a API não atendeu (antes, 43 de 106 voltas
+apareciam como predição pendente no painel do BI sem nada estar errado),
+`volta_no_stint` passou a numerar o mesmo conjunto que a Gold numera, e a
+predição deixou de precisar de um campo auxiliar viajando com a linha.
 
 **Volta sem contexto da sessão espera, e só depois vai para a DLQ.**
 `year` e `circuito` são `NOT NULL`. Mandar a volta para a DLQ porque a

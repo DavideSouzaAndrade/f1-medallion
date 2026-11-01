@@ -1,5 +1,26 @@
 # Plano da frente B — pipeline Dataflow
 
+> **Leia primeiro.** Este documento tem duas camadas. Da seção *O lugar da
+> frente B* em diante ele descreve o plano original (contrato **v1**, parte
+> 2), em que o Pub/Sub transportava a volta já montada e o Dataflow só a
+> validava. Isso mudou: no contrato **v2** o Pub/Sub transporta o dado bruto
+> da OpenF1 e a montagem da volta saiu do Dataform e veio para o Dataflow.
+>
+> O que vale hoje:
+>
+> | onde | o quê |
+> |---|---|
+> | [`streaming/README.md`](../streaming/README.md) | o pipeline atual, decisões e resultados |
+> | [`docs/contrato-openf1.md`](contrato-openf1.md) | o contrato v2 das mensagens |
+> | [`docs/caso-carencia-reordenacao.md`](caso-carencia-reordenacao.md) | os bugs achados, as otimizações e a comparação local × Dataflow |
+> | [`airflow/README.md`](../airflow/README.md) | a orquestração e por que não Composer |
+> | a seção **Partes 2 e 3** no fim deste arquivo | o escopo que substituiu o plano v1 |
+>
+> O plano v1 fica registrado porque as decisões dele seguem valendo
+> (`STREAMING_INSERTS`, `CREATE_NEVER`, schema lido da tabela, DLQ com
+> motivo) e porque o histórico explica por que o pipeline é como é.
+
+
 Registro das decisões e do passo a passo da parte do streaming que lê o
 Pub/Sub e grava no BigQuery. O formato das mensagens está em
 [contrato-evento.md](contrato-evento.md); este documento é o *como*.
@@ -270,3 +291,81 @@ job alguns minutos antes de publicar.
 
 O `drain` foi exercitado ao fim: o job sai de `Running`, as VMs são
 liberadas e a cobrança termina aí.
+
+
+---
+
+# Partes 2 e 3: o escopo que substituiu o plano v1
+
+## O que mudou no contrato
+
+| | v1 | v2 |
+|---|---|---|
+| mensagem | volta montada, formato Silver | registro bruto da OpenF1, intacto |
+| tópicos | 1 | 7 (`laps`, `stints`, `weather`, `intervals`, `pit`, `sessions`, `meetings`) |
+| volume por corrida | ~1.000 | ~27.000 (~110 msg/s no fator 30) |
+| versões do mesmo registro | não | sim — mesmo `_key`, vale a de maior `_id` |
+| ordem | implícita | sem garantia |
+| trabalho do Dataflow | validar | **montar a volta** + validar + prever |
+
+Uma volta passa a nascer de ~26 mensagens: 4 versões de `v1/laps` que se
+substituem, 1 de `v1/stints`, até 1 de `v1/pit` e ~21 de `v1/intervals` que
+entram na média de gap.
+
+## As quatro etapas, e o que cada uma entregou
+
+**Etapa 1 — merges.** As branches `parte3/gerador-openf1` (Fred) e
+`parte2/frente-c-bi` (Davi) entraram na `main` sem conflito.
+
+**Etapa 2 — montar a volta.** `contrato.py` (leitura e tipagem dos 7
+tópicos) e `montagem.py` (a `silver_voltas` em streaming: dedup por
+`_key`/`_id`, janela da volta, casamento de stint com o desempate de
+fantasma, clima as-of, média de gap). O `validacao.py` do v1 saiu.
+
+**Etapa 3 — predição inline.** `predicao.py` chama a API no Cloud Run
+durante o processamento e grava a previsão na mesma linha da volta. É o que
+o enunciado da parte 3 exige.
+
+**Etapa 4 — orquestração.** `airflow/dags/f1_pipeline.py` (fim a fim) e
+`f1_saude.py` (vigilância), em Airflow containerizado numa `e2-medium`.
+
+## Três decisões que carregam o desenho
+
+**Uma chave de estado por `session_key`, não por piloto.** O Beam processa
+uma chave num worker só, então isto serializa a corrida num core. O ganho é
+que clima e contexto da sessão valem para todos os pilotos — separá-los
+exigiria um *side input* atualizável em streaming, frágil no Beam Python. O
+custo é folgado: ~110 msg/s contra as dezenas de milhares que o `DoFn`
+sustenta.
+
+**O estado não guarda intervals nem voltas emitidas.** Intervals são 80% do
+volume e servem a uma coluna. O buffer guarda só o que ainda pode cair numa
+volta aberta, podado a cada emissão. O estado da sessão fica em ordem de KB,
+que é o que torna viável a chave única.
+
+**O que decide a volta é a emissão, não a chegada.** Clima vigente, média de
+gap e fechamento da volta são resolvidos no momento de emitir, por
+timestamp. Decidir na chegada tornava os três dependentes da ordem de
+entrega — foi a raiz de três bugs de uma vez.
+
+## O que ficou fora, e por quê
+
+**O Dataform continua dono do batch.** A tarefa dizia "executar os workflows
+de processamento tais quais o Dataform fazia", e isso se leu como *o
+equivalente em streaming* — montar a volta ao vivo. Reescrever
+bronze→silver→gold em Beam trocaria 438 milhões de linhas em 3min25s por
+algo mais lento, mais caro e com muito mais código, sem ganho. A arquitetura
+híbrida é o que o enunciado da parte 2 pede: "deve ficar evidente a relação
+entre os dados históricos processados em lote e as novas tabelas alimentadas
+continuamente pelo streaming" — e é o que a `vw_voltas_unificada` mostra
+numa consulta só.
+
+**`eh_entrada_box` da volta sob bandeira vermelha.** Os registros de `pit`
+dessa corrida têm data 2.137 s depois da largada: meia hora depois da volta
+terminar. Ao vivo é impossível saber, e não se corrige — é o argumento para
+a DAG de reprocessamento em lote existir.
+
+**`razao_mediana_sessao` e `volta_limpa`.** Dependem da mediana da corrida
+inteira, que ninguém sabe antes do fim, e não estão no schema de
+`f1_stream.voltas`. A mediana corrente é usada só para decidir se a volta vai
+à API.

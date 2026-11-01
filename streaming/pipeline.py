@@ -275,9 +275,11 @@ def montar_grafo(p, assinatura: str, api: str | None = None) -> None:
             | "Prever" >> beam.ParDo(predicao.Predizer(api))
         )
 
-    # A auxiliar que a montagem usa para avisar a predicao nao e coluna: o
-    # BigQuery recusa a linha inteira se receber campo fora do schema.
-    prontas = prontas | "RemoverAuxiliares" >> beam.Map(_so_colunas)
+    # Projeta exatamente as colunas da tabela antes de gravar. Hoje a
+    # montagem ja entrega so elas, mas o BigQuery recusa a linha INTEIRA se
+    # receber um campo fora do schema, e esse erro aparece como linha
+    # perdida na DLQ e nao como falha de codigo. Uma linha de defesa barata.
+    prontas = prontas | "SoColunasDaTabela" >> beam.Map(_so_colunas)
 
     escrita = _escrever(prontas, TABELA_VOLTAS, "GravarVoltas")
     recusadas = escrita.failed_rows_with_errors | "RecusaDoBigQuery" >> beam.Map(_falha_de_escrita)

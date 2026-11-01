@@ -203,13 +203,8 @@ por_volta = {l["lap_number"]: l for l in linhas}
 
 confere("saiu uma linha por volta", sorted(por_volta) == [1, 2, 3, 4, 5])
 confere("a DLQ ficou vazia com dado limpo", motivos == [])
-confere("a linha tem as colunas da tabela, mais a auxiliar",
-        all(tuple(l) == montagem.CAMPOS_DA_TABELA + (montagem.AUXILIAR_ANOMALA,)
-            for l in linhas))
-confere("a auxiliar nao e coluna de f1_stream.voltas",
-        montagem.AUXILIAR_ANOMALA not in montagem.CAMPOS_DA_TABELA)
-confere("a auxiliar e booleana",
-        all(isinstance(l[montagem.AUXILIAR_ANOMALA], bool) for l in linhas))
+confere("a linha tem exatamente as colunas da tabela",
+        all(tuple(l) == montagem.CAMPOS_DA_TABELA for l in linhas))
 
 # --- contexto da sessao, que nao existe no registro da volta -----------------
 
@@ -501,12 +496,23 @@ confere("a mediana nao e poluida pelas voltas anormais",
         montagem._mediana(est["duracoes"]) < 100)
 confere("a amostra guarda so as voltas normais", len(est["duracoes"]) == 42)
 
-# A mediana e das voltas JA EMITIDAS, entao as primeiras da sessao passam.
-confere("a volta 1 da sessao nunca e marcada anomala",
-        por_volta[1][montagem.AUXILIAR_ANOMALA] is False)
-# Na corrida de mentira as cinco voltas sao parecidas: nenhuma e anomala.
-confere("corrida sem incidente nao marca volta anomala",
-        not any(l[montagem.AUXILIAR_ANOMALA] for l in linhas))
+# O corte da mediana faz parte do apto_modelo, e nao de uma marca separada:
+# a Gold trata o filtro como um so, e o painel do BI conta
+# "apto_modelo AND tempo_previsto_s IS NULL" como predicao pendente -- com a
+# volta anomala dentro de apto_modelo, 43 de 106 voltas apareciam pendentes
+# sem nada estar errado.
+est2 = montagem.estado_novo()
+for _ in range(10):
+    montagem.julgar_duracao(est2, 86.0)
+normal = {"composto": "MEDIUM", "duracao_s": 88.0, "idade_pneu": 10,
+          "temp_pista": 50.0, "eh_saida_box": False, "eh_entrada_box": False}
+confere("volta normal e apta",
+        montagem.eh_apto_para_modelo(normal, montagem.eh_anomala(est2, 88.0)) is True)
+confere("volta de safety car NAO e apta",
+        montagem.eh_apto_para_modelo({**normal, "duracao_s": 145.0},
+                                     montagem.eh_anomala(est2, 145.0)) is False)
+confere("a aptidao usa o mesmo corte de 1,15x da Gold",
+        montagem.eh_apto_para_modelo(normal, True) is False)
 
 # --- os quatro tipos invalidos do gerador ------------------------------------
 

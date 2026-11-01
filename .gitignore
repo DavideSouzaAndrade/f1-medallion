@@ -23,3 +23,6 @@ service-account*.json
 dead_docs/
 *.egg-info/
 dist/
+
+# Logs do Airflow local: volume do container, nao codigo.
+airflow/logs/

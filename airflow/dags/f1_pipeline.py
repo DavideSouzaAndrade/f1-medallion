@@ -170,9 +170,15 @@ with DAG(
     # ALL_DONE, e nao a regra padrao: se qualquer tarefa acima falhar, o job
     # do Dataflow ficaria de pe cobrando. Esta e a tarefa que nao pode ser
     # pulada.
+    #
+    # ESPERAR=1 porque o drain nao e instantaneo -- o Dataflow reavalia o
+    # estado a cada 10 minutos, e a cobranca so termina quando as VMs saem.
+    # A tarefa so e marcada como concluida quando nao ha mais worker ligado:
+    # e o que faz "a DAG terminou" significar "paramos de pagar", e e o que
+    # permite a proxima execucao subir sem esbarrar num job ainda ativo.
     drenar_dataflow = BashOperator(
         task_id="drenar_dataflow",
-        bash_command=f"cd {RAIZ} && bash streaming/parar.sh",
+        bash_command=f"cd {RAIZ} && ESPERAR=1 bash streaming/parar.sh",
         env={"PROJECT_ID": PROJETO, "REGIAO": REGIAO},
         append_env=True,
         trigger_rule=TriggerRule.ALL_DONE,

@@ -68,7 +68,13 @@ GRACA_SEM_TEMPO_S = 30.0
 # Rede de seguranca: volta que nunca fecha (sem lap_duration e sem volta
 # seguinte -- a ultima de cada piloto, ou um abandono) sai do estado depois
 # disto, com o que tiver. Sem isto ela ficaria no estado para sempre.
-ABANDONO_S = 600.0
+#
+# Dois minutos, e nao dez: com dez, a ultima volta de cada piloto apareceria
+# no BigQuery muito depois do fim de um replay de 4 minutos, ou seja depois
+# da demonstracao acabar. Dois minutos cobrem com folga a volta mais longa
+# ja vista nesta base -- a de bandeira vermelha da corrida 11361, que no
+# fator 30 ocupa 65 s de relogio.
+ABANDONO_S = 120.0
 
 # Mesmo recorte da gold_degradacao_pneu: os de chuva tem outra fisica e
 # UNKNOWN/TEST_UNKNOWN nao identificam o pneu.
@@ -89,10 +95,6 @@ CAMPOS_DA_TABELA = (
 )
 
 _CAMPOS_CLIMA = ("temp_ar", "temp_pista", "umidade", "chuva")
-
-# Chave auxiliar que viaja com a linha entre a montagem e a predicao, e sai
-# antes da escrita. Nao e coluna de f1_stream.voltas.
-AUXILIAR_ANOMALA = "_anomala"
 
 # Quantas voltas emitidas lembrar por piloto, para barrar reentrega. Uma
 # corrida tem ~60 voltas, entao na pratica guarda a corrida inteira.
@@ -566,13 +568,33 @@ def julgar_duracao(estado: dict[str, Any], duracao: float | None) -> bool:
     return anomala
 
 
-def eh_apto_para_modelo(linha: dict[str, Any]) -> bool:
+def eh_apto_para_modelo(linha: dict[str, Any], anomala: bool) -> bool:
     """A volta serve para o modelo de degradacao?
 
-    Mesmo recorte da gold_degradacao_pneu. A volta inapta e gravada mesmo
-    assim, apenas marcada: a filosofia da Silver e tratar sem filtrar, e
-    quem consome decide.
+    O MESMO recorte da gold_degradacao_pneu, inclusive o corte de 1,15x a
+    mediana -- e isso inclui `anomala`. Separar as duas coisas foi um erro:
+    a Gold trata composto seco, campos presentes, fora do box e dentro da
+    faixa como um filtro unico, e o modelo nunca viu uma volta de safety
+    car. Dizer que ela e "apta ao modelo" seria dizer que o modelo deveria
+    opinar sobre ela.
+
+    Unificar conserta tres coisas de uma vez:
+
+    - a volta sem previsao passa a ser so a que a API nao conseguiu
+      atender, e nao a que foi excluida de proposito. O painel de saude do
+      BI conta `apto_modelo AND tempo_previsto_s IS NULL` como predicao
+      pendente; com as anomalas ali dentro, 43 de 106 voltas apareciam como
+      pendentes sem nada estar errado.
+    - volta_no_stint passa a numerar o mesmo conjunto que a Gold numera,
+      porque o ROW_NUMBER dela corre sobre as voltas que passam pelo filtro
+      inteiro.
+    - a predicao nao precisa mais de um campo auxiliar viajando com a linha.
+
+    A volta inapta e gravada mesmo assim, apenas marcada: a filosofia da
+    Silver e tratar sem filtrar, e quem consome decide.
     """
+    if anomala:
+        return False
     if linha.get("composto") not in COMPOSTOS_SECOS:
         return False
     if any(linha.get(c) is None for c in ("duracao_s", "idade_pneu", "temp_pista")):
@@ -637,7 +659,11 @@ def montar(estado: dict[str, Any], session_key: int, replay_id: str,
         "modelo_versao": None,
     }
 
-    linha["apto_modelo"] = eh_apto_para_modelo(linha)
+    # Julgar a duracao vem antes de decidir a aptidao: o corte de 1,15x a
+    # mediana faz parte do recorte do modelo.
+    linha["apto_modelo"] = eh_apto_para_modelo(
+        linha, julgar_duracao(estado, linha["duracao_s"])
+    )
 
     # volta_no_stint: posicao da volta entre as voltas aptas do stint, como
     # a gold_degradacao_pneu numera. So a volta apta recebe numero, porque
@@ -659,20 +685,7 @@ def montar(estado: dict[str, Any], session_key: int, replay_id: str,
     linha["_ts_processamento"] = processado_em
     linha["latencia_ms"] = int((processado_em - ts_evento).total_seconds() * 1000)
 
-    anomala = julgar_duracao(estado, linha["duracao_s"])
-    #
-    # Isto nao e esmero estatistico, e correcao de um erro medido: na corrida
-    # 11361 houve bandeira vermelha na volta 3 e 4 das 6 primeiras voltas
-    # foram anormais (144 s, 1.954 s, 197 s, 146 s). Com elas na amostra, a
-    # mediana corrente subiu para ~145 s, e a volta 6 -- de 146,7 s, sob
-    # neutralizacao -- passou pelo corte com razao 1,01 e recebeu previsao,
-    # com 58,62 s de erro.
-    saida = {campo: linha.get(campo) for campo in CAMPOS_DA_TABELA}
-    # Auxiliar, nao e coluna: diz ao predicao.py para nao pedir previsao
-    # desta volta. O pipeline a remove antes de gravar, porque o BigQuery
-    # recusa a linha com campo que nao existe no schema.
-    saida[AUXILIAR_ANOMALA] = anomala
-    return saida
+    return {campo: linha.get(campo) for campo in CAMPOS_DA_TABELA}
 
 
 def remover(estado: dict[str, Any], numero_piloto: int, numero_volta: int) -> None:
