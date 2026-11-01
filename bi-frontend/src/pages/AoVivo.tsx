@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Replay } from "../api";
 import { Cartao, Faixa, Kpi, SeloOrigem, Tip, Vazio } from "../components/ui";
-import { corSerie, dominioRobusto, fmtHa, fmtHora, fmtInt, fmtMs, fmtVolta } from "../format";
+import { corSerie, dominioRobusto, fmtHaData, fmtHora, fmtInt, fmtMs, fmtVolta } from "../format";
 import { EstadoAoVivo, useApi, useRelogio } from "../hooks";
 
 const SEM_DADOS_NOVOS_S = 60;
@@ -44,7 +44,22 @@ export default function AoVivo({ vivo }: { vivo: EstadoAoVivo }) {
   const mediana = latencias.length ? latencias[Math.floor(latencias.length / 2)] : null;
   const aptos = eventos.filter((e) => e.apto_modelo).length;
   const comPrevisao = eventos.filter((e) => e.tempo_previsto_s != null).length;
-  const parado = vivo.ultimaVolta != null && (agora - vivo.ultimaVolta) / 1000 > SEM_DADOS_NOVOS_S;
+  // Medido pelo TS do evento, e nao por quando ele chegou nesta aba: o SSE
+  // reenvia o buffer a cada reconexao, entao a chegada reinicia no F5.
+  const ultimoTs = ultimo ? new Date(ultimo.ts_evento).getTime() : null;
+  const parado = ultimoTs != null && (agora - ultimoTs) / 1000 > SEM_DADOS_NOVOS_S;
+
+  // A execucao e um replay ou o feed de verdade? E ela ainda esta chegando?
+  // Procedencia vem da linha; atividade a API deriva do relogio.
+  const meta = replaysApi.dados?.find((r) => r.replay_id === replayId);
+  const eReplay = (meta?.fonte ?? "replay") === "replay";
+  const emCurso = meta?.em_curso ?? !parado;
+  const rotuloOrigem = `${eReplay ? "Replay" : "OpenF1"} · ${emCurso ? "em curso" : "encerrado"}`;
+
+  // A ultima latencia NAO nula. As voltas que nunca receberam versao final
+  // saem por ultimo e tem latencia nula de proposito (nao houve publish_time
+  // para medir contra), entao a mais recente seria sempre "—".
+  const ultimaLatencia = [...eventos].reverse().find((e) => e.latencia_ms != null)?.latencia_ms ?? null;
 
   return (
     <>
@@ -56,7 +71,7 @@ export default function AoVivo({ vivo }: { vivo: EstadoAoVivo }) {
       )}
       {parado && vivo.conexao === "conectado" && (
         <Faixa tipo="aviso">
-          Sem voltas novas {fmtHa(vivo.ultimaVolta, agora)}. O gerador pode ter terminado ou o job do Dataflow estar parado.
+          Sem voltas novas {fmtHaData(ultimo?.ts_evento, agora)}. O gerador pode ter terminado ou o job do Dataflow estar parado.
         </Faixa>
       )}
 
@@ -71,11 +86,21 @@ export default function AoVivo({ vivo }: { vivo: EstadoAoVivo }) {
         </div>
       )}
 
+      {/* Procedência e atividade, lado a lado: um replay encerrado é dado
+          histórico, e a tela não pode insinuar que está acontecendo. */}
+      <Faixa tipo={emCurso ? "ok" : "aviso"}>
+        <strong>{rotuloOrigem}</strong>
+        {eReplay
+          ? " — corrida reproduzida a partir do histórico, não uma corrida acontecendo agora."
+          : " — feed ao vivo da OpenF1."}
+        {!emCurso && " Esta execução terminou: o que você vê aqui é dado histórico."}
+      </Faixa>
+
       <div className="kpis">
         <Kpi rotulo="Voltas recebidas" valor={fmtInt(eventos.length)} detalhe={replayId ?? "nenhuma execução ainda"} />
         <Kpi rotulo="Última volta" valor={ultimo ? `${ultimo.piloto} · V${ultimo.lap_number}` : "—"}
-             detalhe={ultimo ? `chegou ${fmtHa(vivo.ultimaVolta, agora)}` : undefined} />
-        <Kpi rotulo="Latência do pipeline" valor={fmtMs(ultimo?.latencia_ms)} detalhe={`mediana ${fmtMs(mediana)}`} />
+             detalhe={ultimo ? `chegou ${fmtHaData(ultimo.ts_evento, agora)}` : undefined} />
+        <Kpi rotulo="Latência do pipeline" valor={fmtMs(ultimaLatencia)} detalhe={`mediana ${fmtMs(mediana)}`} />
         <Kpi rotulo="Aptas ao modelo" valor={fmtInt(aptos)} detalhe={`${fmtInt(comPrevisao)} já com previsão`} />
       </div>
 
@@ -138,7 +163,12 @@ export default function AoVivo({ vivo }: { vivo: EstadoAoVivo }) {
                       <td>{e.composto ?? "—"}</td>
                       <td className="num">{fmtVolta(e.duracao_s)}</td>
                       <td className="num" title={e.modelo_versao ?? undefined}>
-                        {e.tempo_previsto_s != null ? fmtVolta(e.tempo_previsto_s) : e.apto_modelo ? "aguardando" : "n/a (volta de box)"}
+                        {e.tempo_previsto_s != null
+                          ? fmtVolta(e.tempo_previsto_s)
+                          : e.apto_modelo ? "aguardando"
+                          : e.eh_entrada_box || e.eh_saida_box ? "n/a (volta de box)"
+                          : e.duracao_s == null ? "n/a (volta incompleta)"
+                          : "n/a (fora do recorte)"}
                       </td>
                       <td className="num">{fmtMs(e.latencia_ms)}</td>
                     </tr>

@@ -12,6 +12,10 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+# Mesmo limiar do config.py da API, relido aqui para o mock nao depender
+# do modulo de configuracao (ele roda isolado nos testes).
+EM_CURSO_S = int(os.getenv("EM_CURSO_S", "120"))
+
 TICK_S = float(os.getenv("MOCK_TICK_S", "2"))
 LATENCIA_MAX_MS = int(os.getenv("MOCK_LATENCIA_MAX_MS", "2800"))   # o Dataflow real: mediana 2,2 s, máx. 2,8 s
 COM_PREDICAO = os.getenv("MOCK_PREDICOES", "1") == "1"   # 0 = simula a parte 2 (previsão nula)
@@ -178,7 +182,10 @@ class RepoMock:
             grupos.setdefault(e["replay_id"], []).append(e)
         return [{"replay_id": r, "session_key": SESSAO_AO_VIVO, "circuito": SESSOES[SESSAO_AO_VIVO][1],
                  "eventos": len(es), "ultimo_evento": es[-1]["ts_evento"],
-                 "voltas_na_corrida": SESSOES[SESSAO_AO_VIVO][4] * len(PILOTOS)}
+                 "voltas_na_corrida": SESSOES[SESSAO_AO_VIVO][4] * len(PILOTOS),
+                 "fonte": "replay",
+                 "em_curso": (datetime.now(timezone.utc) - es[-1]["ts_evento"]).total_seconds()
+                             <= EM_CURSO_S}
                 for r, es in sorted(grupos.items(), reverse=True)]
 
     def previsto_real(self, session_key: Optional[int], replay_id: Optional[str], limite: int) -> dict:

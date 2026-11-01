@@ -96,6 +96,7 @@ button, select { font: inherit; color: inherit; }
 
 /* Faixas de aviso (simulado, erro, sem dados) */
 .faixa { padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; display: flex; gap: 10px; align-items: center; }
+.faixa.ok { background: var(--ok-bg, rgba(46,160,67,.14)); color: var(--ok-ink, var(--ink)); }
 .faixa.aviso { background: var(--warning-bg); color: var(--warning-ink); }
 .faixa.erro { background: var(--critical-bg); color: var(--ink); border: 1px solid var(--critical); }
 .faixa button { margin-left: auto; }

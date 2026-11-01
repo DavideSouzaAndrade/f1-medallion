@@ -83,7 +83,7 @@ COMPOSTOS_SECOS = frozenset({"SOFT", "MEDIUM", "HARD"})
 # Ordem das colunas de f1_stream.voltas. As duas da predicao entram no
 # predicao.py; aqui saem nulas.
 CAMPOS_DA_TABELA = (
-    "evento_id", "replay_id", "ts_evento",
+    "evento_id", "replay_id", "fonte", "ts_evento",
     "session_key", "driver_number", "lap_number", "year",
     "circuito", "circuit_type",
     "data_inicio", "duracao_s", "setor_1_s", "setor_2_s", "setor_3_s",
@@ -602,7 +602,7 @@ def eh_apto_para_modelo(linha: dict[str, Any], anomala: bool) -> bool:
     return not (linha.get("eh_saida_box") or linha.get("eh_entrada_box"))
 
 
-def montar(estado: dict[str, Any], session_key: int, replay_id: str,
+def montar(estado: dict[str, Any], session_key: int, replay_id: str, fonte: str,
            numero_piloto: int, numero_volta: int, processado_em: datetime) -> dict[str, Any]:
     """A volta pronta como linha de f1_stream.voltas.
 
@@ -629,6 +629,9 @@ def montar(estado: dict[str, Any], session_key: int, replay_id: str,
     linha: dict[str, Any] = {
         "evento_id": f"{replay_id}:{session_key}:{numero_piloto}:{numero_volta}",
         "replay_id": replay_id,
+        # Procedencia, nao estado: um replay encerrado continua sendo
+        # replay. Se esta em curso se deriva de _ts_processamento.
+        "fonte": fonte,
         "session_key": session_key,
         "driver_number": numero_piloto,
         "lap_number": numero_volta,

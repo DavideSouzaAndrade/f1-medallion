@@ -39,10 +39,10 @@ export function Vazio({ titulo, children }: { titulo: string; children?: ReactNo
   );
 }
 
-export function Faixa({ tipo, children, onRetry }: { tipo: "aviso" | "erro"; children: ReactNode; onRetry?: () => void }) {
+export function Faixa({ tipo, children, onRetry }: { tipo: "ok" | "aviso" | "erro"; children: ReactNode; onRetry?: () => void }) {
   return (
     <div className={`faixa ${tipo}`} role={tipo === "erro" ? "alert" : "status"}>
-      <span aria-hidden>{tipo === "erro" ? "✕" : "⚠"}</span>
+      <span aria-hidden>{tipo === "erro" ? "✕" : tipo === "ok" ? "●" : "⚠"}</span>
       <span>{children}</span>
       {onRetry && <button className="btn" onClick={onRetry}>Tentar de novo</button>}
     </div>

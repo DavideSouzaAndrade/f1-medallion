@@ -68,6 +68,10 @@ export interface Replay {
   eventos: number;
   ultimo_evento: string;
   voltas_na_corrida: number | null;
+  /** "replay" (corrida reproduzida) ou "openf1" (feed ao vivo). Procedência: imutável. */
+  fonte: string;
+  /** Está chegando evento agora? Derivado do relógio pela API, não armazenado. */
+  em_curso: boolean;
 }
 
 export interface EventoStream {

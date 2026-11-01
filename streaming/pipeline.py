@@ -41,7 +41,8 @@ from apache_beam.utils.timestamp import Timestamp
 import montagem
 import predicao
 from contrato import (
-    MOTIVO_BIGQUERY, MensagemInvalida, chave_da_sessao, decodificar, ler, topico_de,
+    MOTIVO_BIGQUERY, MensagemInvalida, chave_da_sessao, decodificar, fonte_de, ler,
+    topico_de,
 )
 
 PROJETO = os.environ.get("PROJECT_ID", "pdm-davi-2026")
@@ -95,8 +96,9 @@ class Classificar(beam.DoFn):
             return
         # O replay_id separa duas execucoes do gerador sobre a mesma corrida;
         # ao vivo nao existe, e a propria fonte identifica a origem.
-        replay_id = mensagem.attributes.get("replay_id") or mensagem.attributes.get("fonte") or "openf1"
-        yield (session_key, (registro, instante.timestamp(), replay_id))
+        fonte = fonte_de(mensagem.attributes)
+        replay_id = mensagem.attributes.get("replay_id") or fonte
+        yield (session_key, (registro, instante.timestamp(), replay_id, fonte))
 
 
 def _rejeicao(corpo: bytes, motivo: str, instante: datetime) -> dict:
@@ -139,11 +141,14 @@ class Montar(beam.DoFn):
     def process(self, elemento,
                 estado=beam.DoFn.StateParam(ESTADO),
                 prazo=beam.DoFn.TimerParam(PRAZO)):
-        _chave, (registro, publicado_em, replay_id) = elemento
+        _chave, (registro, publicado_em, replay_id, fonte) = elemento
         agora = _agora()
 
-        sessao = estado.read() or {"replay_id": None, "estado": montagem.estado_novo()}
+        sessao = estado.read() or {
+            "replay_id": None, "fonte": None, "estado": montagem.estado_novo()
+        }
         sessao["replay_id"] = replay_id
+        sessao["fonte"] = fonte
         montagem.aplicar(
             sessao["estado"], registro,
             datetime.fromtimestamp(publicado_em, timezone.utc), agora,
@@ -169,6 +174,7 @@ class Montar(beam.DoFn):
             try:
                 linha = montagem.montar(
                     sessao["estado"], chave, sessao["replay_id"],
+                    sessao.get("fonte") or "openf1",
                     piloto, volta, processado_em,
                 )
             except MensagemInvalida as erro:

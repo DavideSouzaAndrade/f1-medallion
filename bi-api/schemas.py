@@ -90,6 +90,11 @@ class Replay(BaseModel):
     ultimo_evento: datetime
     # Voltas que a corrida tem no histórico (Silver): o denominador do progresso do replay.
     voltas_na_corrida: Optional[int] = None
+    # De onde o dado veio: "replay" (corrida reproduzida) ou "openf1" (feed ao vivo).
+    # Procedência é imutável — um replay encerrado continua sendo replay.
+    fonte: str = "replay"
+    # Está chegando evento agora? Derivado de ultimo_evento, não armazenado.
+    em_curso: bool = False
 
 
 class EventoStream(BaseModel):

@@ -25,12 +25,14 @@ from contrato import (
     MOTIVO_AUSENTE, MOTIVO_JSON, MOTIVO_SEM_CONTEXTO, MOTIVO_TIPO, MOTIVO_TOPICO,
     MensagemInvalida, chave_da_sessao, decodificar, gap, ler, topico_de,
 )
+from contrato import fonte_de as contrato_fonte
 from corrupcao import TIPOS_INVALIDOS, corromper
 from cronograma import montar as montar_cronograma
 
 SESSION_KEY = 11361
 PILOTO = 44
 REPLAY = "replay-teste"
+FONTE = "replay"
 T0 = datetime(2026, 9, 6, 14, 0, 0, tzinfo=timezone.utc)
 
 falhas = []
@@ -190,7 +192,7 @@ def rodar(mensagens, embaralhar=None):
         processado = datetime.fromtimestamp(agora, timezone.utc)
         for piloto, volta in montagem.vencidas(estado, agora):
             try:
-                linhas.append(montagem.montar(estado, SESSION_KEY, REPLAY, piloto, volta, processado))
+                linhas.append(montagem.montar(estado, SESSION_KEY, REPLAY, FONTE, piloto, volta, processado))
             except MensagemInvalida as erro:
                 motivos.append(str(erro))
             montagem.remover(estado, piloto, volta)
@@ -276,6 +278,23 @@ confere("evento_id e deterministico e identifica a volta",
         por_volta[2]["evento_id"] == f"{REPLAY}:{SESSION_KEY}:{PILOTO}:2")
 confere("evento_id nao repete entre voltas", len({l["evento_id"] for l in linhas}) == len(linhas))
 confere("replay_id vem do atributo da mensagem", all(l["replay_id"] == REPLAY for l in linhas))
+
+# Procedencia: a linha diz se veio de replay ou de feed ao vivo. Antes o
+# pipeline descartava o atributo `fonte` do contrato, e o BigQuery guardava
+# o dado sem o contexto dele.
+confere("a linha guarda a procedencia", all(l["fonte"] == FONTE for l in linhas))
+confere("fonte e coluna da tabela", "fonte" in montagem.CAMPOS_DA_TABELA)
+confere("atributo fonte=replay e lido",
+        contrato_fonte({"fonte": "replay"}) == "replay")
+confere("atributo fonte=openf1 e lido",
+        contrato_fonte({"fonte": "openf1"}) == "openf1")
+confere("maiuscula e espaco nao atrapalham",
+        contrato_fonte({"fonte": " Replay "}) == "replay")
+# Sem atributo, assume ao vivo: uma ponte MQTT que nao o repasse esta
+# entregando dado real, nao replay. O replay sempre se identifica.
+confere("sem atributo, assume ao vivo", contrato_fonte({}) == "openf1")
+confere("valor fora do contrato vira ao vivo",
+        contrato_fonte({"fonte": "qualquer"}) == "openf1")
 confere("latencia_ms = processamento - ts_evento",
         all(l["latencia_ms"] == int((l["_ts_processamento"] - l["ts_evento"]).total_seconds() * 1000)
             for l in linhas if l["latencia_ms"] is not None))
@@ -333,14 +352,14 @@ def rodar_intercalado(mensagens, passo=0.5, janela=None, semente=0):
         # O timer do Beam dispara a cada prazo vencido, nao so no fim.
         processado = datetime.fromtimestamp(agora, timezone.utc)
         for piloto, volta in montagem.vencidas(estado, agora):
-            linhas.append(montagem.montar(estado, SESSION_KEY, REPLAY, piloto, volta, processado))
+            linhas.append(montagem.montar(estado, SESSION_KEY, REPLAY, FONTE, piloto, volta, processado))
             montagem.remover(estado, piloto, volta)
     # Solta o que ficou aberto.
     for salto in (montagem.GRACA_SEM_TEMPO_S + 1, montagem.ABANDONO_S + 1):  # noqa: B007
         agora += salto
         processado = datetime.fromtimestamp(agora, timezone.utc)
         for piloto, volta in montagem.vencidas(estado, agora):
-            linhas.append(montagem.montar(estado, SESSION_KEY, REPLAY, piloto, volta, processado))
+            linhas.append(montagem.montar(estado, SESSION_KEY, REPLAY, FONTE, piloto, volta, processado))
             montagem.remover(estado, piloto, volta)
     return linhas, estado
 

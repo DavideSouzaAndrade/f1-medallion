@@ -156,10 +156,20 @@ class RepoBigQuery:
               GROUP BY session_key)
             SELECT v.replay_id, v.session_key, ANY_VALUE(v.circuito) AS circuito,
                    COUNT(*) AS eventos, MAX(v.ts_evento) AS ultimo_evento,
-                   ANY_VALUE(t.voltas_na_corrida) AS voltas_na_corrida
+                   ANY_VALUE(t.voltas_na_corrida) AS voltas_na_corrida,
+                   -- Procedência: vem da linha, porque é propriedade dela.
+                   -- Linha antiga, de antes da coluna existir, é replay:
+                   -- nunca houve feed ao vivo neste projeto.
+                   COALESCE(ANY_VALUE(v.fonte), 'replay') AS fonte,
+                   -- Atividade: DERIVADA do relógio, porque muda sozinha.
+                   -- Uma execução encerrada continua sendo replay; ela só
+                   -- deixa de estar em curso.
+                   TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), MAX(v.ts_evento), SECOND)
+                     <= @em_curso_s AS em_curso
             FROM v LEFT JOIN totais t USING (session_key)
             GROUP BY v.replay_id, v.session_key
-            ORDER BY ultimo_evento DESC LIMIT 20""")
+            ORDER BY ultimo_evento DESC LIMIT 20""",
+            [_p("em_curso_s", "INT64", cfg.EM_CURSO_S)])
 
     def eventos_stream(self, desde: Optional[datetime], limite: int) -> list[dict]:
         """Eventos em ordem crescente de processamento.

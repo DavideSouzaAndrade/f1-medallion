@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS ${self()} (
   -- Controle do evento
   evento_id          STRING    NOT NULL OPTIONS (description = "UUID por mensagem. O Pub/Sub entrega pelo menos uma vez: a deduplicacao e por este campo."),
   replay_id          STRING    NOT NULL OPTIONS (description = "Uma execucao do gerador. Separa dois replays da mesma corrida."),
+  fonte              STRING    OPTIONS (description = "De onde a mensagem veio: 'replay' para corrida reproduzida da Bronze, 'openf1' para feed ao vivo. E PROCEDENCIA, nao estado: um replay encerrado continua sendo replay. Se a execucao esta em curso se deriva de MAX(_ts_processamento), nao desta coluna."),
   ts_evento          TIMESTAMP NOT NULL OPTIONS (description = "Hora da publicacao no Pub/Sub, em UTC. Define a particao."),
 
   -- Chave natural, a mesma da silver_voltas

@@ -17,6 +17,18 @@ CACHE_S = int(os.getenv("CACHE_S", "60"))
 STREAM_POLL_S = float(os.getenv("STREAM_POLL_S", "3"))
 STREAM_BUFFER = int(os.getenv("STREAM_BUFFER", "200"))   # eventos entregues a quem acabou de conectar
 
+# Quanto tempo sem evento novo até uma execução deixar de estar "em curso".
+#
+# Isto é o que separa "acontecendo agora" de "dado histórico", e é DERIVADO,
+# não armazenado: uma volta gravada às 23:00 estava em curso às 23:00 e é
+# histórico às 23:10, sem que nada nela mude. Guardar isso numa coluna
+# exigiria reescrever linhas com o passar do tempo.
+#
+# 120 s cobre uma pausa do replay (o gerador limita a espera entre mensagens
+# a 2 s, mas o Dataflow tem carência e o BigQuery tem latência de inserção)
+# sem deixar uma execução encerrada parecendo viva por muito tempo.
+EM_CURSO_S = int(os.getenv("EM_CURSO_S", "120"))
+
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
 
 # Dataset.tabela, como nos .sqlx do Dataform.

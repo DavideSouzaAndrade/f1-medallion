@@ -228,6 +228,27 @@ def topico_de(atributos: dict[str, str]) -> str:
     return nome
 
 
+# O que o atributo `fonte` pode valer, segundo o contrato v2.
+FONTE_REPLAY = "replay"
+FONTE_AO_VIVO = "openf1"
+
+
+def fonte_de(atributos: dict[str, str]) -> str:
+    """De onde a mensagem veio: replay de corrida guardada, ou feed ao vivo.
+
+    Procedencia e propriedade da linha, nao do transporte. O contrato v2
+    carrega `fonte` em toda mensagem e o pipeline a descartava -- entao o
+    BigQuery guardava o dado e perdia o contexto dele, e quem consome nao
+    tinha como distinguir uma corrida reproduzida de uma acontecendo.
+
+    Nao confundir com "esta ao vivo agora": isso e temporal, muda sozinho e
+    se deriva de quando o ultimo evento chegou. Um replay encerrado continua
+    sendo um replay; ele so deixa de estar em curso.
+    """
+    bruto = (atributos.get("fonte") or "").strip().lower()
+    return bruto if bruto in (FONTE_REPLAY, FONTE_AO_VIVO) else FONTE_AO_VIVO
+
+
 def chave_da_sessao(atributos: dict[str, str]) -> int:
     """A session_key do atributo, que e a chave de particionamento.
 

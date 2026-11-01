@@ -25,6 +25,19 @@ export function fmtHora(iso: string | null | undefined): string {
   return iso ? new Date(iso).toLocaleTimeString("pt-BR") : "—";
 }
 
+/**
+ * "há 12 s" a partir do TIMESTAMP DO EVENTO, não de quando ele chegou aqui.
+ *
+ * A diferença não é sutil: o SSE reenvia o buffer a cada reconexão, então
+ * medir desde a chegada fazia o contador reiniciar a cada F5 e um evento de
+ * uma hora atrás aparecer como "chegou há 6 s" — a tela afirmava que o dado
+ * era fresco quando não era.
+ */
+export function fmtHaData(iso: string | null | undefined, agoraMs: number): string {
+  if (!iso) return "—";
+  return fmtHa(new Date(iso).getTime(), agoraMs);
+}
+
 /** "há 12 s" / "há 3 min". */
 export function fmtHa(desdeMs: number | null, agoraMs: number): string {
   if (desdeMs == null) return "—";

@@ -73,8 +73,22 @@ PREFIXO_JOB = "f1-openf1-"
 FIM = " "
 
 SESSAO = "{{ dag_run.conf.get('session_key', '11361') }}"
-MINUTOS = "{{ dag_run.conf.get('minutos', '45') }}"
 INVALIDOS = "{{ dag_run.conf.get('injetar_invalidos', '0.01') }}"
+
+# Fator 10, e nao os 30 do gerador. A corrida 11361 tem 111 minutos, entao:
+#
+#     fator 30 -> 4,7 min de replay, ~95 mensagens/s
+#     fator 10 -> 14,2 min de replay, ~32 mensagens/s
+#
+# Catorze minutos dao tempo de abrir o painel, mostrar as voltas entrando,
+# explicar a predicao e responder pergunta. Cinco nao dao -- e o ritmo mais
+# baixo ainda folga a reordenacao, que e o que a carencia precisa absorver.
+FATOR = "{{ dag_run.conf.get('fator', '10') }}"
+
+# Vazio por padrao: a corrida INTEIRA. Cortar o replay deixava a ultima
+# volta de cada piloto sem tempo -- ela comecava e o replay acabava no meio
+# dela -- e isso aparecia no painel como 21 voltas estranhas sem duracao.
+MINUTOS = "{{ dag_run.conf.get('minutos', '') }}"
 
 padrao = {
     "owner": "frente-b",
@@ -155,10 +169,17 @@ with DAG(
     # replay. Com fator 30, a corrida inteira sai em ~4 min.
     disparar_gerador = BashOperator(
         task_id="disparar_gerador",
+        # --minutos so entra se vier na configuracao: o gerador trata a
+        # ausencia dele como "a corrida inteira", e passar vazio seria erro
+        # de argumento.
         bash_command=(
-            f"gcloud run jobs execute f1-gerador --project={PROJETO} --region={REGIAO} "
-            f'--args="--session-key,{SESSAO},--minutos,{MINUTOS},'
-            f'--injetar-invalidos,{INVALIDOS}" --wait'
+            "set -euo pipefail\n"
+            f'ARGS="--session-key,{SESSAO},--fator,{FATOR},--injetar-invalidos,{INVALIDOS}"\n'
+            f'MINUTOS="{MINUTOS}"\n'
+            'if [ -n "$MINUTOS" ]; then ARGS="$ARGS,--minutos,$MINUTOS"; fi\n'
+            'echo "argumentos do gerador: $ARGS"\n'
+            f"gcloud run jobs execute f1-gerador --project={PROJETO} "
+            f'--region={REGIAO} --args="$ARGS" --wait\n'
         ),
     )
 
@@ -171,7 +192,7 @@ with DAG(
         endpoint="api/pipeline/status",
         request_params={"max_idade_s": 120},
         poke_interval=15,
-        timeout=int(timedelta(minutes=10).total_seconds()),
+        timeout=int(timedelta(minutes=10).total_seconds()),  # o stream fica saudavel em segundos
         # reschedule e nao poke: libera o worker entre as tentativas em vez
         # de ocupar um slot por dez minutos.
         mode="reschedule",
