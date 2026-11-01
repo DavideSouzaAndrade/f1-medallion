@@ -65,6 +65,37 @@ gcloud compute ssh f1-airflow --zone=us-central1-a -- -L 8080:localhost:8080
 arquivo: o `gcloud` dentro do container pega as credenciais do servidor de
 metadados da VM.
 
+### Provisionamento sem SSH
+
+Na prática a VM se provisiona sozinha, por `startup-script` nos metadados —
+não por SSH. Dois motivos:
+
+1. **O SSH não funciona para contas externas à organização** do projeto. O
+   OS Login exige `roles/compute.osLoginExternalUser` no nível da
+   organização, e desligá-lo seria enfraquecer a segurança da VM.
+2. Script de boot é reproduzível; comando digitado numa sessão não é.
+
+O script instala o Docker, baixa o repositório por **tarball HTTP** (o
+repositório é público, então não há credencial envolvida) e sobe o compose.
+É idempotente: um `reset` da VM refaz tudo sem reinstalar o que já existe.
+
+Acompanhar sem SSH, pelo console serial:
+
+```bash
+gcloud compute instances get-serial-port-output f1-airflow \
+  --zone=us-central1-a | grep 'command("/bin/bash")'
+```
+
+Duas armadilhas que esse caminho revelou e que estão resolvidas no script:
+
+- **`docker-compose-v2` não existe no Debian 12** (é pacote do Ubuntu), e
+  pedir vários pacotes numa chamada do `apt` faz um nome inexistente
+  derrubar a transação inteira — nenhum dos outros é instalado. O script
+  instala um por vez e busca o plugin do compose do binário oficial.
+- **O container roda como uid 50000** e o repositório baixado é do root. O
+  Beam escreve o `egg-info` no diretório do `streaming/setup.py` ao
+  empacotar o job, então o script faz `chown -R 50000:0` no repositório.
+
 **Desligar entre as demonstrações** — é isso que faz o custo ser de dólares
 e não de dezenas:
 
@@ -85,8 +116,11 @@ mkdir -p logs && docker compose up -d --build
 ```
 
 Monta o seu `~/.config/gcloud` no container, então o `gcloud` de dentro
-autentica com a sua conta. Sem a variável, o compose monta `/dev/null` e só
-o servidor de metadados da VM funcionaria.
+autentica com a sua conta. Sem a variável, o compose usa um volume nomeado
+vazio e só o servidor de metadados da VM funciona — que é o caso na VM.
+
+O padrão é um volume nomeado, e não `/dev/null`: montar um dispositivo de
+caractere onde o container espera um diretório quebra a subida.
 
 ## As duas ferramentas que a imagem acrescenta
 
