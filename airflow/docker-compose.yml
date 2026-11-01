@@ -1,0 +1,128 @@
+# Airflow para a orquestracao da frente B, numa VM pequena do Compute Engine.
+#
+# Por que nao Cloud Composer: o Composer e este mesmo Airflow rodando sobre
+# um cluster GKE gerenciado, e cobra de US$ 300 a 400 por mes com o cluster,
+# o Cloud SQL e o control plane ligados 24 h. A carga de orquestracao daqui
+# e uma DAG de seis tarefas -- o paralelismo de dados esta no Dataflow, nao
+# no orquestrador. Numa e2-medium desligada entre as demonstracoes, o custo
+# fica no disco: ~US$ 1 por mes.
+#
+# Por que nao Cloud Run: o scheduler do Airflow e um laco que precisa rodar
+# continuamente e o banco de metadados tem de sobreviver a reinicio. O Cloud
+# Run reinicia o container quando quer e o disco e efemero -- o historico de
+# execucoes se perderia, e com min-instances=1 e CPU sempre alocada o custo
+# ja passaria de US$ 35 por mes sem resolver a persistencia.
+#
+# LocalExecutor e nao CeleryExecutor: o compose oficial do Airflow sobe
+# Redis e dois workers Celery, que nao cabem nos 4 GB da e2-medium. O
+# LocalExecutor roda as tarefas em subprocessos do proprio scheduler, o que
+# basta para seis tarefas em sequencia.
+#
+# Autenticacao: na VM, o gcloud dentro do container pega as credenciais do
+# servidor de metadados do Compute Engine, como a service account da propria
+# VM. Nenhuma chave em arquivo. Na maquina local, monte o seu
+# ~/.config/gcloud (ver airflow/README.md).
+
+x-airflow-comum: &airflow-comum
+  build:
+    # A raiz do projeto: o Dockerfile le streaming/requirements.txt dela.
+    context: ..
+    dockerfile: airflow/Dockerfile
+  environment: &airflow-ambiente
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    # Uma execucao da DAG principal sobe um job que cobra por hora: duas em
+    # paralelo seria cobranca dobrada na mesma assinatura.
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "1"
+    AIRFLOW__CORE__PARALLELISM: "4"
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: "30"
+    # Onde o repositorio aparece dentro do container; a DAG usa isto para
+    # achar o streaming/subir.sh.
+    F1_RAIZ: /opt/f1-medallion
+    # O subir.sh usa este interpretador em vez do venv do repositorio.
+    PYTHON: /opt/beam/bin/python
+    PROJECT_ID: ${PROJECT_ID:-pdm-davi-2026}
+    REGIAO: ${REGIAO:-us-central1}
+    # As duas connections HTTP que as DAGs esperam, por variavel de
+    # ambiente: evita configurar nada a mao na interface.
+    AIRFLOW_CONN_F1_API: ${AIRFLOW_CONN_F1_API:-https://f1-api-ytz2c7b2wq-uc.a.run.app}
+    AIRFLOW_CONN_F1_BI_API: ${AIRFLOW_CONN_F1_BI_API:-https://f1-bi-api-ytz2c7b2wq-uc.a.run.app}
+  volumes:
+    - ./dags:/opt/airflow/dags:ro
+    - ./logs:/opt/airflow/logs
+    # O repositorio inteiro: a DAG chama streaming/subir.sh e parar.sh.
+    #
+    # Montado com escrita, e nao :ro, por uma razao concreta: ao lancar o
+    # job, o Beam empacota o streaming/setup.py rodando um sdist, e isso
+    # escreve egg-info e dist/ no diretorio do setup.py. Com :ro o
+    # subir_dataflow falharia no empacotamento. Os dois artefatos ja estao
+    # no .gitignore.
+    - ..:/opt/f1-medallion
+    # Credenciais na maquina local. Na VM do Compute Engine isto nao e
+    # usado: o metadados da VM responde sozinho.
+    - ${GCLOUD_CONFIG:-/dev/null}:/home/airflow/.config/gcloud:ro
+  user: "50000:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      # O historico de execucoes sobrevive a reinicio e a VM desligada --
+      # e a razao de nao usar Cloud Run.
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+    restart: unless-stopped
+
+  init:
+    <<: *airflow-comum
+    # Roda uma vez: cria o schema e o usuario da interface.
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create --username admin --password "${AIRFLOW_SENHA:-admin}" \
+          --firstname Frente --lastname B --role Admin --email admin@example.com || true
+    restart: "no"
+
+  scheduler:
+    <<: *airflow-comum
+    command: scheduler
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  webserver:
+    <<: *airflow-comum
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres:

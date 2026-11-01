@@ -473,6 +473,34 @@ confere("volta de safety car e anomala", montagem.eh_anomala(est, 145.0) is True
 confere("volta sem tempo nao e anomala", montagem.eh_anomala(est, None) is False)
 confere("a razao maxima e a mesma da Gold", montagem.RAZAO_MAXIMA == 1.15)
 
+# A regressao da mediana poluida. Reproduz a corrida 11361 volta a volta,
+# na ordem e com as duracoes medidas: bandeira vermelha na volta 3, e 4 das
+# 6 primeiras voltas anormais. Com as anomalas na amostra, a mediana subia
+# para ~145 s e a volta 6 (146,7 s, sob neutralizacao) passava pelo corte
+# com razao 1,01 -- e recebia previsao com 58,62 s de erro.
+CORRIDA_11361 = [
+    (1, 94.1, False),    # largada: lenta, mas e a referencia da sessao
+    (2, 88.5, False),    # corrida normal
+    (3, 144.7, True),    # bandeira vermelha: todos ao box
+    (4, 1954.2, True),   # corrida parada
+    (5, 197.5, True),    # relargada
+    (6, 146.7, True),    # ainda neutralizada
+]
+
+est = montagem.estado_novo()
+julgadas = []
+for _volta, duracao, _esperado in CORRIDA_11361:
+    # 21 pilotos por volta, como na corrida de verdade: e o volume de
+    # duracoes anormais que envenenava a amostra.
+    marcas = [montagem.julgar_duracao(est, duracao) for _ in range(21)]
+    julgadas.append(marcas[0])
+
+confere("a corrida 11361 e julgada volta a volta como o lote julgaria",
+        julgadas == [esperado for _v, _d, esperado in CORRIDA_11361])
+confere("a mediana nao e poluida pelas voltas anormais",
+        montagem._mediana(est["duracoes"]) < 100)
+confere("a amostra guarda so as voltas normais", len(est["duracoes"]) == 42)
+
 # A mediana e das voltas JA EMITIDAS, entao as primeiras da sessao passam.
 confere("a volta 1 da sessao nunca e marcada anomala",
         por_volta[1][montagem.AUXILIAR_ANOMALA] is False)

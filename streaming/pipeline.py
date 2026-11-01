@@ -49,6 +49,12 @@ ASSINATURA = f"projects/{PROJETO}/subscriptions/f1-openf1-dataflow"
 TABELA_VOLTAS = f"{PROJETO}:f1_stream.voltas"
 TABELA_DLQ = f"{PROJETO}:f1_stream.voltas_dlq"
 
+# O Dataflow precisa de um bucket para o pacote do job e os arquivos
+# temporarios. Usa um prefixo no bucket que o setup/setup_gcp.sh ja cria,
+# em vez de um bucket proprio: o projeto e compartilhado com outras
+# disciplinas, e menos recurso solto e menos chance de alguem apagar.
+BUCKET = os.environ.get("BUCKET_NAME", "f1-raw-pdm-davi-2026")
+
 # Prefixo do nome do job. O subir.sh e o parar.sh procuram por ele, e e por
 # ele que o Airflow identifica o job para drenar.
 PREFIXO_JOB = "f1-openf1-"
@@ -299,8 +305,8 @@ def _opcoes(args) -> PipelineOptions:
         nuvem = opcoes.view_as(GoogleCloudOptions)
         nuvem.project = PROJETO
         nuvem.region = args.regiao
-        nuvem.temp_location = f"gs://{PROJETO}-dataflow/temp"
-        nuvem.staging_location = f"gs://{PROJETO}-dataflow/staging"
+        nuvem.temp_location = f"gs://{BUCKET}/dataflow/temp"
+        nuvem.staging_location = f"gs://{BUCKET}/dataflow/staging"
         nuvem.job_name = args.nome or PREFIXO_JOB + datetime.now().strftime("%Y%m%d-%H%M%S")
         nuvem.service_account_email = f"f1-dataflow@{PROJETO}.iam.gserviceaccount.com"
         nuvem.enable_streaming_engine = True

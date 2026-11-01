@@ -181,7 +181,7 @@ def _data(epoch: float | None) -> datetime | None:
 
 
 def aplicar(estado: dict[str, Any], registro: dict[str, Any],
-            publicado_em: datetime, agora: float) -> None:
+            publicado_em: datetime, agora: float) -> None:  # noqa: C901
     """Incorpora um registro tipado ao estado da sessao.
 
     `publicado_em` e o publish_time da mensagem no Pub/Sub, que o contrato
@@ -199,12 +199,18 @@ def aplicar(estado: dict[str, Any], registro: dict[str, Any],
         _clima(estado, registro)
     elif topico == "stints":
         _stint(estado, registro)
+        _antecipar(estado, _piloto(estado, registro["driver_number"]), agora)
     elif topico == "pit":
         _pit(estado, registro)
     elif topico == "laps":
         _volta(estado, registro, publicado_em, agora)
     elif topico == "intervals":
         _interval(estado, registro)
+        # O registro que acabou de entrar pode ser o que faltava para a
+        # volta estar completa: reavalia, em vez de deixar a carencia longa
+        # correr por nada. Vale para stint e intervals, os dois que costumam
+        # chegar depois da versao final da volta.
+        _antecipar(estado, _piloto(estado, registro["driver_number"]), agora)
 
 
 # Teto de leituras de clima guardadas. Sao ~176 por corrida, uma por minuto,
@@ -350,6 +356,24 @@ def _completa(estado: dict[str, Any], piloto: dict[str, Any],
     # Medicao de gap alcancando o fim da volta: o que vinha depois dela
     # pertence a volta seguinte.
     return any(m["data"] >= inicio + duracao for m in piloto["intervals"])
+
+
+def _antecipar(estado: dict[str, Any], piloto: dict[str, Any], agora: float) -> None:
+    """Puxa para agora o prazo da volta que acabou de ficar completa.
+
+    Sem isto, a carencia da volta completa quase nunca valia: a medicao de
+    gap que cobre o fim da volta e publicada ~4 s de corrida DEPOIS do fim
+    dela, ou seja ~0,13 s de relogio depois da versao final no fator 30.
+    Quando ela chegava, a volta ja tinha marcado os 3 s da GRACA_S e nada
+    reavaliava. Medido no Dataflow: mediana de 4,6 s, com piso de 2,68 s em
+    vez do ~1 s previsto.
+    """
+    for volta in piloto["voltas"].values():
+        prazo = volta["prazo"]
+        if prazo is None or prazo <= agora:
+            continue
+        if _completa(estado, piloto, volta):
+            volta["prazo"] = min(prazo, agora + GRACA_COMPLETA_S)
 
 
 def _interval(estado: dict[str, Any], registro: dict[str, Any]) -> None:
@@ -516,6 +540,32 @@ def eh_anomala(estado: dict[str, Any], duracao: float | None) -> bool:
     return duracao / mediana > RAZAO_MAXIMA
 
 
+def julgar_duracao(estado: dict[str, Any], duracao: float | None) -> bool:
+    """Julga a volta e, se ela for normal, a inclui na amostra da mediana.
+
+    Na amostra entra so a volta normal, e isto nao e esmero estatistico: e
+    correcao de um erro medido. Na corrida 11361 houve bandeira vermelha na
+    volta 3, e 4 das 6 primeiras voltas foram anormais (144 s, 1.954 s,
+    197 s, 146 s). Com elas na amostra, a mediana corrente subiu para ~145 s,
+    e a volta 6 -- de 146,7 s, sob neutralizacao -- passou pelo corte com
+    razao 1,01 e recebeu previsao, com 58,62 s de erro.
+
+    O lote nao sofre disto porque divide pela mediana da corrida INTEIRA, em
+    que as voltas normais dominam. Ao vivo, no inicio da sessao, poucas
+    voltas anormais bastam para dominar a amostra -- entao ela precisa se
+    defender delas.
+
+    Julgar e registrar ficam na mesma funcao para que nao exista uma volta
+    julgada normal que nao entrou na amostra, nem o contrario.
+    """
+    anomala = eh_anomala(estado, duracao)
+    if duracao is not None and not anomala:
+        estado["duracoes"].append(duracao)
+        if len(estado["duracoes"]) > _MAX_DURACOES:
+            del estado["duracoes"][: len(estado["duracoes"]) - _MAX_DURACOES]
+    return anomala
+
+
 def eh_apto_para_modelo(linha: dict[str, Any]) -> bool:
     """A volta serve para o modelo de degradacao?
 
@@ -609,12 +659,14 @@ def montar(estado: dict[str, Any], session_key: int, replay_id: str,
     linha["_ts_processamento"] = processado_em
     linha["latencia_ms"] = int((processado_em - ts_evento).total_seconds() * 1000)
 
-    anomala = eh_anomala(estado, linha["duracao_s"])
-    if linha["duracao_s"] is not None:
-        estado["duracoes"].append(linha["duracao_s"])
-        if len(estado["duracoes"]) > _MAX_DURACOES:
-            del estado["duracoes"][: len(estado["duracoes"]) - _MAX_DURACOES]
-
+    anomala = julgar_duracao(estado, linha["duracao_s"])
+    #
+    # Isto nao e esmero estatistico, e correcao de um erro medido: na corrida
+    # 11361 houve bandeira vermelha na volta 3 e 4 das 6 primeiras voltas
+    # foram anormais (144 s, 1.954 s, 197 s, 146 s). Com elas na amostra, a
+    # mediana corrente subiu para ~145 s, e a volta 6 -- de 146,7 s, sob
+    # neutralizacao -- passou pelo corte com razao 1,01 e recebeu previsao,
+    # com 58,62 s de erro.
     saida = {campo: linha.get(campo) for campo in CAMPOS_DA_TABELA}
     # Auxiliar, nao e coluna: diz ao predicao.py para nao pedir previsao
     # desta volta. O pipeline a remove antes de gravar, porque o BigQuery
