@@ -4,3 +4,7 @@ apache-beam[gcp]==2.77.0
 # Um venv de Python 3.12+ nao traz mais setuptools por padrao.
 setuptools>=70
 build>=1.2
+
+# O predicao.py chama a API no Cloud Run. Vem junto com o Beam por
+# dependencia transitiva, mas aqui a versao fica explicita.
+requests>=2.32

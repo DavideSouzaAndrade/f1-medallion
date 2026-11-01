@@ -14,5 +14,5 @@ setup(
     name="f1-streaming",
     version="1.0.0",
     description="Montagem da volta a partir do dado bruto da OpenF1",
-    py_modules=["contrato", "montagem"],
+    py_modules=["contrato", "montagem", "predicao"],
 )

@@ -42,6 +42,16 @@ from contrato import MOTIVO_SEM_CONTEXTO, MensagemInvalida
 # de saude do BI cobra (10 s).
 GRACA_S = 3.0
 
+# Carencia de quem ja tem tudo. Quando stint, clima e cobertura de intervals
+# ja chegaram, nao ha atrasado para esperar e a volta pode sair quase na
+# hora -- derruba o piso de latencia de ~3 s para ~1 s.
+#
+# Nao e zero: a reordenacao do Pub/Sub e sub-segundo (medido: ~0,18 s a 110
+# mensagens/s), e 1 s da ~5x de margem para a medicao de gap que ainda
+# estiver em voo dentro da janela. E a troca que a alavanca faz -- menos
+# latencia, menos margem de reordenacao.
+GRACA_COMPLETA_S = 1.0
+
 # Carencia de quem ainda NAO fechou, quando a volta seguinte comeca.
 #
 # No lote, a janela da volta termina no inicio da seguinte (o LEAD da
@@ -80,9 +90,27 @@ CAMPOS_DA_TABELA = (
 
 _CAMPOS_CLIMA = ("temp_ar", "temp_pista", "umidade", "chuva")
 
+# Chave auxiliar que viaja com a linha entre a montagem e a predicao, e sai
+# antes da escrita. Nao e coluna de f1_stream.voltas.
+AUXILIAR_ANOMALA = "_anomala"
+
 # Quantas voltas emitidas lembrar por piloto, para barrar reentrega. Uma
 # corrida tem ~60 voltas, entao na pratica guarda a corrida inteira.
 _MAX_EMITIDAS = 100
+
+# Corte de volta anomala, o mesmo da gold_degradacao_pneu: safety car,
+# bandeira amarela, problema mecanico. Mais frouxo que o 1,07 da Silver de
+# proposito -- o corte apertado descartaria justamente as voltas mais
+# degradadas, que sao o fenomeno que o modelo quer capturar.
+#
+# A diferenca inevitavel com o lote: a Gold divide pela mediana da corrida
+# inteira, e ao vivo ninguem a sabe antes do fim. Aqui a mediana e das
+# voltas recebidas ate o momento, como o contrato v2 preve.
+RAZAO_MAXIMA = 1.15
+
+# Teto de duracoes guardadas para a mediana corrente. Uma corrida tem ~1.100
+# voltas; 600 ja da uma mediana estavel e limita o custo da ordenacao.
+_MAX_DURACOES = 600
 
 # Teto de medicoes de gap por piloto. A poda normal e por tempo, em
 # remover(); este teto so protege o estado se nenhuma volta fechar.
@@ -103,6 +131,9 @@ def estado_novo() -> dict[str, Any]:
         # na emissao e nao na chegada: a leitura certa pode chegar depois da
         # volta que a usa, e o Pub/Sub nao garante ordem.
         "clima": [],
+        # Duracoes das voltas ja emitidas, para a mediana corrente da
+        # sessao. E ela que identifica a volta anomala.
+        "duracoes": [],
         # driver_number (como texto, para o estado ser serializavel) -> piloto
         "pilotos": {},
     }
@@ -286,13 +317,39 @@ def _volta(estado: dict[str, Any], registro: dict[str, Any],
     atual["eh_saida_box"] = bool(registro["eh_saida_box"])
 
     # lap_duration so aparece na versao final: a volta fechou. Dai conta a
-    # carencia curta para os atrasados. O min() antecipa um prazo longo que
-    # a volta seguinte ja tenha marcado -- e o caso comum, e sem isto a
-    # latencia seria a carencia longa em toda volta.
+    # carencia para os atrasados -- ou nada, se nao houver atrasado nenhum.
+    # O min() antecipa um prazo longo que a volta seguinte ja tenha marcado:
+    # e o caso comum, e sem isto a latencia seria a carencia longa sempre.
     if registro["duracao_s"] is not None:
         atual["ts_evento"] = publicado_em.timestamp()
-        proximo = agora + GRACA_S
+        proximo = agora + (GRACA_COMPLETA_S if _completa(estado, piloto, atual) else GRACA_S)
         atual["prazo"] = proximo if atual["prazo"] is None else min(atual["prazo"], proximo)
+
+
+def _completa(estado: dict[str, Any], piloto: dict[str, Any],
+              volta: dict[str, Any]) -> bool:
+    """Ja chegou tudo o que a volta precisa?
+
+    A carencia existe para esperar dado atrasado. Quando nada esta
+    atrasado, esperar so adiciona latencia -- e no caso comum nada esta: o
+    stint sai no inicio da volta, o clima ja vigia, e os intervals sao
+    medidos durante ela. Confirmado isso, a volta sai na hora.
+
+    Nao e um palpite: cada condicao e a presenca efetiva do dado que
+    alimenta uma coluna. A cobertura dos intervals ate o fim da volta e a
+    mais exigente, e e justamente a que protege a media do gap -- a coluna
+    que mais sofria quando eu decidia na chegada.
+    """
+    inicio, duracao = volta.get("data_inicio"), volta.get("duracao_s")
+    if inicio is None or duracao is None:
+        return False
+    if _stint_da_volta(piloto["stints"], volta["lap_number"]) is None:
+        return False
+    if not any(leitura["data"] <= inicio for leitura in estado["clima"]):
+        return False
+    # Medicao de gap alcancando o fim da volta: o que vinha depois dela
+    # pertence a volta seguinte.
+    return any(m["data"] >= inicio + duracao for m in piloto["intervals"])
 
 
 def _interval(estado: dict[str, Any], registro: dict[str, Any]) -> None:
@@ -378,12 +435,21 @@ def vencidas(estado: dict[str, Any], agora: float) -> list[tuple[int, int]]:
     espera_contexto = not tem_contexto(estado)
     prontas = []
     for numero, piloto in estado["pilotos"].items():
-        for volta in piloto["voltas"].values():
+        # Em ordem de volta, parando na primeira que ainda nao venceu: as
+        # voltas de um piloto saem na ordem em que ele as rodou.
+        #
+        # Nao e esmero: volta_no_stint e a posicao da volta entre as voltas
+        # aptas do stint, e so da para saber isso tendo decidido as
+        # anteriores. Emitir fora de ordem dava o numero da anterior a volta
+        # seguinte. O prazo de abandono impede que uma volta travada segure
+        # as outras para sempre.
+        for volta in sorted(piloto["voltas"].values(), key=lambda v: v["lap_number"]):
             prazo = volta["prazo"]
             no_prazo = prazo is not None and prazo <= agora and not espera_contexto
-            if no_prazo or volta["limite"] <= agora:
-                prontas.append((int(numero), volta["lap_number"]))
-    # Por volta antes de por piloto: volta_no_stint depende da ordem.
+            if not (no_prazo or volta["limite"] <= agora):
+                break
+            prontas.append((int(numero), volta["lap_number"]))
+    # Por volta antes de por piloto, para a saida ser estavel.
     return sorted(prontas, key=lambda p: (p[1], p[0]))
 
 
@@ -421,6 +487,33 @@ def _stint_da_volta(stints: dict[str, Any], numero: int) -> dict[str, Any] | Non
             -s["stint_number"],
         ),
     )
+
+
+def _mediana(valores: list[float]) -> float | None:
+    if not valores:
+        return None
+    ordenados = sorted(valores)
+    meio = len(ordenados) // 2
+    if len(ordenados) % 2:
+        return ordenados[meio]
+    return (ordenados[meio - 1] + ordenados[meio]) / 2
+
+
+def eh_anomala(estado: dict[str, Any], duracao: float | None) -> bool:
+    """A volta esta fora da faixa de volta aproveitavel da sessao?
+
+    Compara com a mediana das voltas recebidas ate agora, no mesmo corte da
+    gold_degradacao_pneu. Serve para nao pedir previsao de uma volta sob
+    safety car ou bandeira: o modelo foi treinado sem elas, e prever ali
+    produziria um erro de dezenas de segundos que poluiria o painel.
+
+    Sem mediana ainda -- as primeiras voltas da sessao -- nada e anomalo: o
+    benefico da duvida fica com a volta.
+    """
+    mediana = _mediana(estado["duracoes"])
+    if duracao is None or mediana is None or mediana <= 0:
+        return False
+    return duracao / mediana > RAZAO_MAXIMA
 
 
 def eh_apto_para_modelo(linha: dict[str, Any]) -> bool:
@@ -516,7 +609,18 @@ def montar(estado: dict[str, Any], session_key: int, replay_id: str,
     linha["_ts_processamento"] = processado_em
     linha["latencia_ms"] = int((processado_em - ts_evento).total_seconds() * 1000)
 
-    return {campo: linha.get(campo) for campo in CAMPOS_DA_TABELA}
+    anomala = eh_anomala(estado, linha["duracao_s"])
+    if linha["duracao_s"] is not None:
+        estado["duracoes"].append(linha["duracao_s"])
+        if len(estado["duracoes"]) > _MAX_DURACOES:
+            del estado["duracoes"][: len(estado["duracoes"]) - _MAX_DURACOES]
+
+    saida = {campo: linha.get(campo) for campo in CAMPOS_DA_TABELA}
+    # Auxiliar, nao e coluna: diz ao predicao.py para nao pedir previsao
+    # desta volta. O pipeline a remove antes de gravar, porque o BigQuery
+    # recusa a linha com campo que nao existe no schema.
+    saida[AUXILIAR_ANOMALA] = anomala
+    return saida
 
 
 def remover(estado: dict[str, Any], numero_piloto: int, numero_volta: int) -> None:

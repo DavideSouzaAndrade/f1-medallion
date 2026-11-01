@@ -39,6 +39,7 @@ from apache_beam.transforms.timeutil import TimeDomain
 from apache_beam.utils.timestamp import Timestamp
 
 import montagem
+import predicao
 from contrato import (
     MOTIVO_BIGQUERY, MensagemInvalida, chave_da_sessao, decodificar, ler, topico_de,
 )
@@ -223,6 +224,10 @@ def _escrever(colecao, tabela: str, rotulo: str):
     )
 
 
+def _so_colunas(linha: dict) -> dict:
+    return {campo: linha.get(campo) for campo in montagem.CAMPOS_DA_TABELA}
+
+
 def _falha_de_escrita(falha) -> dict:
     """Linha recusada pelo BigQuery -> linha de DLQ.
 
@@ -237,7 +242,7 @@ def _falha_de_escrita(falha) -> dict:
     }
 
 
-def montar_grafo(p, assinatura: str) -> None:
+def montar_grafo(p, assinatura: str, api: str | None = None) -> None:
     lidas = (
         p
         | "LerPubSub" >> beam.io.ReadFromPubSub(subscription=assinatura, with_attributes=True)
@@ -248,7 +253,27 @@ def montar_grafo(p, assinatura: str) -> None:
         | "Montar" >> beam.ParDo(Montar()).with_outputs(DLQ, main="voltas")
     )
 
-    escrita = _escrever(voltas.voltas, TABELA_VOLTAS, "GravarVoltas")
+    # A predicao acontece AQUI, entre montar e gravar, e nao num job
+    # posterior: e o que o enunciado da parte 3 pede e o que permite ao BI
+    # mostrar previsto e real na mesma linha.
+    #
+    # O agrupamento aproveita o formato da emissao: o timer solta de uma vez
+    # todas as voltas que fecharam, e com 20 pilotos na pista isso costuma
+    # ser ~20 voltas -- uma chamada em vez de vinte.
+    prontas = voltas.voltas
+    if api is not None:
+        prontas = (
+            prontas
+            | "AgruparParaAPI" >> beam.BatchElements(
+                min_batch_size=1, max_batch_size=predicao.MAX_LOTE)
+            | "Prever" >> beam.ParDo(predicao.Predizer(api))
+        )
+
+    # A auxiliar que a montagem usa para avisar a predicao nao e coluna: o
+    # BigQuery recusa a linha inteira se receber campo fora do schema.
+    prontas = prontas | "RemoverAuxiliares" >> beam.Map(_so_colunas)
+
+    escrita = _escrever(prontas, TABELA_VOLTAS, "GravarVoltas")
     recusadas = escrita.failed_rows_with_errors | "RecusaDoBigQuery" >> beam.Map(_falha_de_escrita)
 
     _escrever(
@@ -314,13 +339,17 @@ def main() -> None:
     parser.add_argument("--nome", help=f"nome do job; padrao {PREFIXO_JOB}<data>")
     parser.add_argument("--duracao", type=float, metavar="S",
                         help="so no DirectRunner: encerra depois de S segundos")
+    parser.add_argument("--api", default=predicao.API,
+                        help="API de predicao no Cloud Run (padrao: %(default)s)")
+    parser.add_argument("--sem-previsao", action="store_true",
+                        help="grava a volta sem chamar a API, para medir a montagem isolada")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s",
                         datefmt="%H:%M:%S")
 
     p = beam.Pipeline(options=_opcoes(args))
-    montar_grafo(p, args.assinatura)
+    montar_grafo(p, args.assinatura, None if args.sem_previsao else args.api)
     resultado = p.run()
 
     if args.runner == "DirectRunner":

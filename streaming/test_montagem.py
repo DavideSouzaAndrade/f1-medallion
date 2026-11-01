@@ -203,8 +203,13 @@ por_volta = {l["lap_number"]: l for l in linhas}
 
 confere("saiu uma linha por volta", sorted(por_volta) == [1, 2, 3, 4, 5])
 confere("a DLQ ficou vazia com dado limpo", motivos == [])
-confere("a linha tem exatamente as colunas da tabela",
-        all(tuple(l) == montagem.CAMPOS_DA_TABELA for l in linhas))
+confere("a linha tem as colunas da tabela, mais a auxiliar",
+        all(tuple(l) == montagem.CAMPOS_DA_TABELA + (montagem.AUXILIAR_ANOMALA,)
+            for l in linhas))
+confere("a auxiliar nao e coluna de f1_stream.voltas",
+        montagem.AUXILIAR_ANOMALA not in montagem.CAMPOS_DA_TABELA)
+confere("a auxiliar e booleana",
+        all(isinstance(l[montagem.AUXILIAR_ANOMALA], bool) for l in linhas))
 
 # --- contexto da sessao, que nao existe no registro da volta -----------------
 
@@ -358,13 +363,14 @@ confere("colher no meio da o mesmo clima",
 #
 #     deslocamento maximo   execucoes divergentes
 #          0,2 s                   0/15
-#          2,0 s                   0/15
-#          4,0 s                   1/15
-#         10,0 s                   5/15
+#          0,5 s                   0/15
+#          1,0 s                   0/15
+#          2,0 s                   1/15
 #
-# A carencia e de 3 s (GRACA_S). Em producao, a 110 mensagens/s do fator 30,
-# 20 mensagens de deslocamento sao 0,18 s -- uma margem de ~16x. O teste
-# roda no limite util (2 s) e exige igualdade exata.
+# A fronteira e a GRACA_COMPLETA_S (1 s): a volta que ja tem tudo sai depois
+# dela, e nao dos 3 s da GRACA_S. Em producao, a 110 mensagens/s do fator
+# 30, 20 mensagens de deslocamento sao 0,18 s -- margem de ~5x. O teste roda
+# no limite (1 s) e exige igualdade exata.
 CAMPOS_SENSIVEIS = ("duracao_s", "composto", "idade_pneu", "temp_pista",
                     "gap_medio_a_frente", "volta_no_stint")
 esperado = {n: {c: l[c] for c in CAMPOS_SENSIVEIS} for n, l in por_volta.items()}
@@ -372,7 +378,7 @@ esperado = {n: {c: l[c] for c in CAMPOS_SENSIVEIS} for n, l in por_volta.items()
 reordenado_ok = True
 for janela in (5, 10, 20):
     for semente in (1, 7, 42, 99, 123):
-        obtidas, _ = rodar_intercalado(cronograma.mensagens, passo=0.1,
+        obtidas, _ = rodar_intercalado(cronograma.mensagens, passo=0.05,
                                        janela=janela, semente=semente)
         if len(obtidas) != len(linhas):
             reordenado_ok = False
@@ -450,6 +456,29 @@ for i, msg in enumerate(cronograma.mensagens, start=1):
 tamanho = len(json.dumps(estado, default=str))
 confere(f"o estado nao guarda os intervals ({tamanho} bytes para {len(cronograma.mensagens)} mensagens)",
         tamanho < 6000)
+
+# --- volta anomala pela mediana corrente -------------------------------------
+#
+# A gold_degradacao_pneu treina so com volta dentro de 1,15x a mediana da
+# sessao: safety car e bandeira ficam fora. Ao vivo nao se sabe a mediana da
+# corrida, so a das voltas recebidas -- e e o que o contrato v2 autoriza.
+
+est = montagem.estado_novo()
+confere("sem mediana ainda, nada e anomalo", montagem.eh_anomala(est, 300.0) is False)
+est["duracoes"] = [85.0, 86.0, 87.0]
+confere("volta normal nao e anomala", montagem.eh_anomala(est, 88.0) is False)
+confere("volta no limite de 1,15x nao e anomala",
+        montagem.eh_anomala(est, 86.0 * montagem.RAZAO_MAXIMA) is False)
+confere("volta de safety car e anomala", montagem.eh_anomala(est, 145.0) is True)
+confere("volta sem tempo nao e anomala", montagem.eh_anomala(est, None) is False)
+confere("a razao maxima e a mesma da Gold", montagem.RAZAO_MAXIMA == 1.15)
+
+# A mediana e das voltas JA EMITIDAS, entao as primeiras da sessao passam.
+confere("a volta 1 da sessao nunca e marcada anomala",
+        por_volta[1][montagem.AUXILIAR_ANOMALA] is False)
+# Na corrida de mentira as cinco voltas sao parecidas: nenhuma e anomala.
+confere("corrida sem incidente nao marca volta anomala",
+        not any(l[montagem.AUXILIAR_ANOMALA] for l in linhas))
 
 # --- os quatro tipos invalidos do gerador ------------------------------------
 
