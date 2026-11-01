@@ -278,7 +278,18 @@ confere("evento_id nao repete entre voltas", len({l["evento_id"] for l in linhas
 confere("replay_id vem do atributo da mensagem", all(l["replay_id"] == REPLAY for l in linhas))
 confere("latencia_ms = processamento - ts_evento",
         all(l["latencia_ms"] == int((l["_ts_processamento"] - l["ts_evento"]).total_seconds() * 1000)
-            for l in linhas))
+            for l in linhas if l["latencia_ms"] is not None))
+
+# A volta 5 da corrida de mentira nunca recebe lap_duration e nao tem volta
+# seguinte: sai pelo prazo de abandono, sem nunca ter tido um publish_time
+# atribuido. A latencia dela e desconhecida, nao zero -- zero contaminaria o
+# p95 que o painel de saude do BI cobra.
+confere("volta sem versao final tem latencia nula, nao zero",
+        por_volta[5]["latencia_ms"] is None)
+confere("volta sem versao final ainda tem ts_evento (NOT NULL na tabela)",
+        por_volta[5]["ts_evento"] is not None)
+confere("as voltas que fecharam tem latencia medida",
+        all(por_volta[n]["latencia_ms"] is not None for n in (1, 2, 3, 4)))
 
 # --- colher no meio do fluxo -------------------------------------------------
 #

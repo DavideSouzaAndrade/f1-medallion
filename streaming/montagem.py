@@ -680,10 +680,19 @@ def montar(estado: dict[str, Any], session_key: int, replay_id: str,
     else:
         linha["volta_no_stint"] = None
 
-    ts_evento = _data(volta.get("ts_evento")) or processado_em
-    linha["ts_evento"] = ts_evento
+    # ts_evento e NOT NULL e define a particao, entao a volta que nunca
+    # recebeu versao final cai para o instante de processamento. A latencia
+    # dessa, porem, fica NULA e nao zero: zero seria afirmar que o evento
+    # foi processado no instante em que foi publicado, e ninguem sabe quando
+    # ele foi publicado. Zero tambem puxaria para baixo o p95 que o painel
+    # de saude do BI cobra -- uma medida inventada contaminando uma real.
+    publicado = _data(volta.get("ts_evento"))
+    linha["ts_evento"] = publicado or processado_em
     linha["_ts_processamento"] = processado_em
-    linha["latencia_ms"] = int((processado_em - ts_evento).total_seconds() * 1000)
+    linha["latencia_ms"] = (
+        None if publicado is None
+        else int((processado_em - publicado).total_seconds() * 1000)
+    )
 
     return {campo: linha.get(campo) for campo in CAMPOS_DA_TABELA}
 
