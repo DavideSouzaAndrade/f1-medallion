@@ -234,6 +234,28 @@ com Python 3.10–3.14) e o código do pipeline não depende de versão, mas o
 worker não é o mesmo binário — ao comparar medições, vale conferir de onde o
 job foi lançado.
 
+## Consultar o estado sem abrir a interface
+
+A API REST está habilitada com basic auth, então o estado de uma DAG é uma
+requisição — útil para script e para quem não quer abrir navegador:
+
+```bash
+# com o túnel IAP de pé em localhost:8080
+curl -s -u admin:"${AIRFLOW_SENHA:-admin}" \
+  "http://localhost:8080/api/v1/dags/f1_pipeline_fim_a_fim/dagRuns?order_by=-execution_date&limit=3" \
+  | python3 -m json.tool
+
+# disparar a DAG principal com parâmetros
+curl -s -u admin:"${AIRFLOW_SENHA:-admin}" -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"conf": {"session_key": "11361", "minutos": "45"}}' \
+  "http://localhost:8080/api/v1/dags/f1_pipeline_fim_a_fim/dagRuns"
+```
+
+Sem isso, a API responde 401 a tudo (o padrão do Airflow 2.10 é só sessão),
+e consultar estado exigia abrir a interface — ou, sem SSH, reiniciar a VM só
+para rodar um comando, que é insustentável.
+
 ## Senha da interface
 
 O `init` cria o usuário `admin` com a senha de `AIRFLOW_SENHA`, cujo padrão

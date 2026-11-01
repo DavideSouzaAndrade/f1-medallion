@@ -43,6 +43,15 @@ x-airflow-comum: &airflow-comum
     AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "1"
     AIRFLOW__CORE__PARALLELISM: "4"
     AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: "30"
+    # Habilita basic auth na API REST, alem da sessao que a interface usa.
+    # Sem isto a API responde 401 a tudo e consultar o estado de uma DAG
+    # exige abrir a interface -- ou, sem SSH, reiniciar a VM so para rodar
+    # um comando, que foi como eu comecei e e insustentavel.
+    #
+    # A exposicao e aceitavel porque a porta nunca esta na internet: na VM
+    # chega-se por IAP, que autentica antes de encaminhar, e localmente ela
+    # so escuta em localhost. Ainda assim, troque AIRFLOW_SENHA.
+    AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
     # Onde o repositorio aparece dentro do container; a DAG usa isto para
     # achar o streaming/subir.sh.
     F1_RAIZ: /opt/f1-medallion
