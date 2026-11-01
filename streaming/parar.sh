@@ -31,7 +31,7 @@ JOBS=$(gcloud dataflow jobs list \
   --project="${PROJECT_ID}" \
   --region="${REGIAO}" \
   --status=active \
-  --filter="name~^f1-voltas-" \
+  --filter="name~^f1-openf1-" \
   --format="value(id)")
 
 if [[ -z "${JOBS}" ]]; then

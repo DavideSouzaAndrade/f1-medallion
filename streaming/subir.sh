@@ -2,6 +2,9 @@
 #
 # Sobe o pipeline de streaming no Dataflow.
 #
+# O job monta a volta a partir do dado bruto da OpenF1 (contrato v2) e
+# grava em f1_stream.voltas. Nome do job: f1-openf1-<data>.
+#
 # O job fica de pe ate alguem derruba-lo: o Dataflow cobra por hora de
 # worker ligado, tenha mensagem ou nao. Nao esqueca do streaming/parar.sh.
 #
@@ -32,7 +35,7 @@ EM_EXECUCAO=$(gcloud dataflow jobs list \
   --project="${PROJECT_ID}" \
   --region="${REGIAO}" \
   --status=active \
-  --filter="name~^f1-voltas-" \
+  --filter="name~^f1-openf1-" \
   --format="value(id,name)" 2>/dev/null || true)
 
 if [[ -n "${EM_EXECUCAO}" ]]; then
@@ -61,7 +64,7 @@ Acompanhar:
 
 Publicar eventos:
   gcloud run jobs execute f1-gerador --region=${REGIAO} \\
-    --args="--limite,50,--injetar-invalidos,0.1"
+    --args="--session-key,11361,--minutos,5,--injetar-invalidos,0.01"
 
 Derrubar (NAO ESQUECA -- cobra por hora ligado):
   bash streaming/parar.sh
