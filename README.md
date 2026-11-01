@@ -82,6 +82,7 @@ vigia a saúde e drena o job no fim.
 
 | Documento | Conteúdo |
 |-----------|----------|
+| **[docs/arquitetura.md](docs/arquitetura.md)** | **Comece por aqui.** O sistema inteiro: o caminho do dado de ponta a ponta, as três frentes, camada por camada, as decisões e os resultados medidos |
 | [docs/perfil-dados-bronze.md](docs/perfil-dados-bronze.md) | Campo a campo dos 18 endpoints na Bronze e a proposta de estrutura da Silver |
 | [docs/analise-exploratoria.md](docs/analise-exploratoria.md) | Qualidade dos dados medida na Bronze e a decisão de tratamento que cada achado implica |
 | [docs/ingestao-incremental.md](docs/ingestao-incremental.md) | Como a ingestão se atualiza com as corridas novas sem varrer tudo |
