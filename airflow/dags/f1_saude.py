@@ -9,8 +9,20 @@ As duas tarefas usam o status HTTP como resultado, nao o corpo: a API de BI
 devolve 503 quando alguma checagem falha, e o sensor marca a tarefa como
 falha sozinho (bi-api/AIRFLOW.md).
 
-Enquanto nao houver Dataflow de pe, esta DAG falha -- e o comportamento
-certo: ela mede se o stream esta vivo, e ele nao esta.
+Esta DAG NAO exige stream ao vivo, e e de proposito.
+
+O painel de BI reprova por padrao quando o ultimo evento tem mais de 300 s,
+o que faz sentido durante um replay. Mas o replay so roda em demonstracao, e
+uma DAG de 5 em 5 minutos cobrando frescor de 300 s falha o tempo todo --
+medido: tres execucoes vermelhas seguidas com o pipeline perfeitamente sao.
+Uma parede de vermelho ninguem olha, e ai a falha de verdade passa batido.
+
+Entao aqui o frescor e medido em dias, so para detectar abandono. Cobrar
+frescor de minutos e tarefa da DAG principal, no esperar_stream_saudavel,
+que roda logo depois de publicar e sabe que deveria haver evento chegando.
+
+O que esta DAG vigia e o que tem de valer SEMPRE: as duas APIs responderem,
+a latencia do que foi gravado estar no limite, e a DLQ nao ter explodido.
 """
 
 from __future__ import annotations
@@ -55,13 +67,17 @@ with DAG(
     )
 
     # As quatro checagens do pipeline: stream recente, latencia p95, DLQ e
-    # predicoes. O limite de idade e mais frouxo que na DAG principal porque
-    # aqui nao ha replay em curso garantido.
+    # predicoes.
+    #
+    # max_idade_s em 2 dias, e nao nos 300 s do padrao: aqui nao ha replay em
+    # curso, e cobrar frescor de minutos faria esta DAG falhar a cada 5
+    # minutos com o pipeline sao. Dois dias detectam abandono -- ninguem
+    # rodou nada desde a ultima aula -- sem alarme falso entre demonstracoes.
     pipeline_saudavel = HttpSensor(
         task_id="pipeline_saudavel",
         http_conn_id="f1_bi_api",
+        request_params={"max_idade_s": 60 * 60 * 48},
         endpoint="api/pipeline/status",
-        request_params={"max_idade_s": 300},
         poke_interval=30,
         timeout=int(timedelta(minutes=4).total_seconds()),
         mode="reschedule",

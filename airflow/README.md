@@ -10,6 +10,15 @@ o Dataflow cobra por hora de worker ligado.
 | [`f1_pipeline_fim_a_fim`](dags/f1_pipeline.py) | sob demanda | o pipeline de ponta a ponta, do aquecimento ao drain |
 | [`f1_saude_pipeline`](dags/f1_saude.py) | a cada 5 min | vigia as duas APIs e as quatro checagens do pipeline |
 
+A DAG de saúde **não exige stream ao vivo**. O painel de BI reprova por
+padrão quando o último evento tem mais de 300 s, o que faz sentido durante
+um replay — mas o replay só roda em demonstração, e uma DAG de 5 em 5
+minutos cobrando isso falha o tempo todo (medido: três execuções vermelhas
+seguidas com o pipeline perfeitamente são). Parede de vermelho ninguém olha,
+e aí a falha de verdade passa batido. Aqui o frescor é medido em **dois
+dias**, só para detectar abandono; cobrar frescor de minutos é tarefa da DAG
+principal, que sabe que acabou de publicar.
+
 ## Por que não Cloud Composer
 
 O Composer **é** este mesmo Airflow, rodando sobre um cluster GKE
