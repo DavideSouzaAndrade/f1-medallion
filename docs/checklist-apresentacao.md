@@ -122,8 +122,24 @@ ORDER BY _ts_processamento DESC LIMIT 10;
 
 ### 6. Abrir o front e clicar em tudo
 
-`https://f1-bi-frontend-ytz2c7b2wq-uc.a.run.app` — as quatro telas:
-Histórico, Ao vivo, Previsto × Real, Saúde.
+**Use esta URL, e não outra:**
+
+```
+https://f1-bi-frontend-418113305910.us-central1.run.app
+```
+
+O Cloud Run expõe cada serviço em **duas** URLs — uma com o número do
+projeto e outra com um hash (`f1-bi-frontend-ytz2c7b2wq-uc.a.run.app`). As
+duas servem a mesma página, mas o `CORS_ORIGINS` da API de BI só libera a
+primeira, e o navegador manda a origem exata. Pela URL de hash, todas as
+telas mostram **"Não foi possível falar com a API de BI"** — parece a API
+fora do ar, e não é.
+
+As quatro telas: Histórico, Ao vivo, Previsto × Real, Saúde.
+
+Na tela **Previsto × Real**, selecione uma execução. Sem filtro o MAE
+mostra ~11 s, porque mistura execuções de outubro no contrato v1; filtrando
+pela execução do dia, mostra o número real (4,09 s na de 01/11).
 
 ### 7. Garantir que não há job do Dataflow de pé 💰
 
@@ -198,6 +214,7 @@ gcloud dataflow jobs list --region=us-central1 --status=active   # tem que vir v
 | `subir_dataflow` falha com "já existe job ativo" | sobrou job da véspera | `ESPERAR=1 bash streaming/parar.sh` e disparar de novo |
 | DLQ com muita coisa | normal: o gerador injeta 1% de propósito | mostrar como recurso, não como defeito |
 | `Could not resolve host` / `NameResolutionError` / `nodename nor servname provided` | **DNS, não o projeto** — em 01/11 a causa foi uma **VPN ativa** | desligar a VPN. Testar com `python3 -c "import socket; print(socket.gethostbyname('"'"'github.com'"'"'))"` |
+| front mostra "Não foi possível falar com a API de BI" | URL errada do front: o `CORS_ORIGINS` libera só a de número de projeto | abrir `https://f1-bi-frontend-418113305910.us-central1.run.app` |
 
 **A carta na manga:** se o ao vivo falhar, o BigQuery tem as execuções
 anteriores. `SELECT ... FROM f1_stream.voltas WHERE tempo_previsto_s IS NOT
