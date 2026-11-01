@@ -46,15 +46,21 @@ export GCLOUD_CONFIG="$HOME/.config/gcloud"
 mkdir -p logs && docker compose up -d --build   # interface: http://localhost:8080
 ```
 
-A interface do Airflow da VM **não é alcançável**: ela escuta na 8080 da
-VM, o caminho normal é um túnel SSH, e o SSH não funciona para conta externa
-à organização do projeto (o OS Login exige
-`roles/compute.osLoginExternalUser` no nível da org — org `378548377305`,
-que nem o dono do projeto necessariamente administra).
+Há **dois** caminhos para a interface, e os dois estão testados.
 
-O Airflow local roda a **mesma** DAG, chamando o **mesmo** `gcloud` e o
-**mesmo** Beam, subindo o Dataflow no **mesmo** projeto. Muda só onde o
-scheduler mora. Então:
+**O da VM, por IAP** (preferido, porque mostra o Airflow rodando na nuvem):
+
+```bash
+gcloud compute start-iap-tunnel f1-airflow 8080 \
+  --local-host-port=localhost:8080 --zone=us-central1-a
+```
+
+Não precisa de SSH — o que é essencial, porque o SSH não atende conta
+externa à organização do projeto. A regra de firewall e a tag já existem.
+
+**O local**, se o túnel falhar ou a rede estiver instável: roda a **mesma**
+DAG, chamando o **mesmo** `gcloud` e o **mesmo** Beam, subindo o Dataflow no
+**mesmo** projeto. Muda só onde o scheduler mora. Então:
 
 | | para quê |
 |---|---|

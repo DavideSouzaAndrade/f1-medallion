@@ -66,23 +66,59 @@ git clone <repo> f1-medallion && cd f1-medallion/airflow
 # 3. Subir
 mkdir -p logs && docker compose up -d --build
 
-# 4. A interface, por túnel (não exponha a 8080 na internet)
-gcloud compute ssh f1-airflow --zone=us-central1-a -- -L 8080:localhost:8080
+# 4. A interface, por túnel IAP (ver a seção abaixo)
+gcloud compute start-iap-tunnel f1-airflow 8080 \
+  --local-host-port=localhost:8080 --zone=us-central1-a
 ```
 
 `--scopes=cloud-platform` com a service account é o que dispensa chave em
 arquivo: o `gcloud` dentro do container pega as credenciais do servidor de
 metadados da VM.
 
+### A interface, por IAP TCP forwarding
+
+```bash
+gcloud compute start-iap-tunnel f1-airflow 8080 \
+  --local-host-port=localhost:8080 --zone=us-central1-a
+# interface em http://localhost:8080  (admin / admin)
+```
+
+O IAP encaminha TCP para a porta **sem SSH e sem OS Login**, que é o que
+torna isso possível aqui: o SSH não funciona para conta externa à
+organização do projeto (o OS Login exige
+`roles/compute.osLoginExternalUser` no nível da org, e desligá-lo seria
+enfraquecer a VM).
+
+Precisa de uma regra de firewall, criada uma vez:
+
+```bash
+gcloud compute firewall-rules create f1-airflow-iap-8080 \
+  --direction=INGRESS --action=ALLOW --rules=tcp:8080 \
+  --source-ranges=35.235.240.0/20 \
+  --target-tags=f1-airflow-ui
+
+gcloud compute instances add-tags f1-airflow --zone=us-central1-a \
+  --tags=f1-airflow-ui
+```
+
+A regra é estreita de propósito e **não expõe nada na internet**: a origem
+é só a faixa documentada do IAP (`35.235.240.0/20`), uma porta, e só para a
+tag `f1-airflow-ui`. Quem chega por ali já passou pela autenticação do
+Google. Expor a 8080 ao mundo seria colocar um Airflow na internet.
+
+Se o túnel falhar com `PERMISSION_DENIED`, falta
+`roles/iap.tunnelResourceAccessor` — essa é **no projeto**, então o dono do
+projeto concede.
+
+Se falhar com `[Errno 8] nodename nor servname provided`, é **DNS da sua
+rede**, não o IAP: aconteceu quatro vezes em 01/11 e passou sozinho.
+Repetir resolve.
+
 ### Provisionamento sem SSH
 
-Na prática a VM se provisiona sozinha, por `startup-script` nos metadados —
-não por SSH. Dois motivos:
-
-1. **O SSH não funciona para contas externas à organização** do projeto. O
-   OS Login exige `roles/compute.osLoginExternalUser` no nível da
-   organização, e desligá-lo seria enfraquecer a segurança da VM.
-2. Script de boot é reproduzível; comando digitado numa sessão não é.
+A VM se provisiona sozinha, por `startup-script` nos metadados — não por
+SSH. Dois motivos: o SSH não atende conta externa à organização (acima), e
+script de boot é reproduzível, comando digitado numa sessão não é.
 
 O script é [`provisionar-vm.sh`](provisionar-vm.sh): instala o Docker, baixa
 o repositório por **tarball HTTP** (o repositório é público, então não há
