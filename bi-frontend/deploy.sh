@@ -26,8 +26,19 @@ FRONT=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$
 echo ">> front no ar: $FRONT"
 
 # Confere que a URL da API entrou no build (sem ela o front chamaria a si mesmo, sem erro visível).
-JS=$(curl -s "$FRONT/" | grep -o 'assets/[^"]*\.js' | head -1)
-if curl -s "$FRONT/$JS" | grep -q "${API_URL#https://}"; then
+# Com retentativa: logo apos o deploy o Cloud Run ainda pode estar roteando
+# para a revisao antiga, e uma checagem de uma tentativa so acusa falha que
+# nao existe. Aviso que grita lobo treina todo mundo a ignorar aviso.
+ACHOU=0
+for tentativa in 1 2 3 4 5 6; do
+  JS=$(curl -s --max-time 30 "$FRONT/" | grep -o 'assets/[^"]*\.js' | head -1)
+  if [ -n "$JS" ] && curl -s --max-time 60 "$FRONT/$JS" | grep -q "${API_URL#https://}"; then
+    ACHOU=1; break
+  fi
+  echo "   conferindo o build publicado (tentativa $tentativa)..."
+  sleep 10
+done
+if [ "$ACHOU" = "1" ]; then
   echo ">> ok: o front aponta para a API"
 else
   echo "!! ATENÇÃO: a URL da API NÃO entrou no build do front. Veja o bi-frontend/.gcloudignore." >&2
