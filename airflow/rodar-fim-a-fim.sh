@@ -8,8 +8,12 @@ cd /opt/f1-medallion/airflow || { marca "FALHA: airflow nao provisionado"; exit 
 cmp() { docker compose exec -T scheduler "$@"; }
 
 marca "atualizando o repositorio para o ultimo commit do ramo"
-RAMO=parte3/frente-b-dataflow
 REPO=DavideSouzaAndrade/f1-medallion
+# Mesmo metadado que o provisionar-vm.sh usa, com main como padrao.
+RAMO=$(curl -fsS -H "Metadata-Flavor: Google" \
+  "http://metadata.google.internal/computeMetadata/v1/instance/attributes/f1-ramo" \
+  2>/dev/null || echo "main")
+[[ -n "${RAMO:-}" ]] || RAMO=main
 rm -rf /tmp/f1 && mkdir -p /tmp/f1
 if curl -fsSL "https://api.github.com/repos/${REPO}/tarball/${RAMO}" | tar xz -C /tmp/f1 --strip-components=1; then
   # Copia sobre o que existe, preservando airflow/logs (volume do container).

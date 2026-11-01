@@ -19,8 +19,19 @@ marca() { echo "### F1-AIRFLOW [$(date -u +%H:%M:%S)] $*"; }
 morrer() { marca "FALHA: $*"; exit 1; }
 
 RAIZ=/opt/f1-medallion
-RAMO=parte3/frente-b-dataflow
 REPO=DavideSouzaAndrade/f1-medallion
+
+# O ramo vem de um metadado da instancia, com main como padrao. Chumbar o
+# ramo no script faria a VM continuar baixando um ramo de trabalho depois
+# que ele fosse mergeado -- e trocar isso exigiria editar e republicar o
+# script. Para apontar para outro ramo:
+#
+#   gcloud compute instances add-metadata f1-airflow --zone=us-central1-a \
+#     --metadata=f1-ramo=parte3/frente-b-dataflow
+RAMO=$(curl -fsS -H "Metadata-Flavor: Google" \
+  "http://metadata.google.internal/computeMetadata/v1/instance/attributes/f1-ramo" \
+  2>/dev/null || echo "main")
+[[ -n "${RAMO:-}" ]] || RAMO=main
 
 marca "inicio do provisionamento"
 
