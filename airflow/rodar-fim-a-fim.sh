@@ -38,16 +38,41 @@ cmp airflow dags trigger f1_pipeline_fim_a_fim \
   --run-id "$EXEC" \
   --conf '{"session_key":"11361","minutos":"45","injetar_invalidos":"0.01"}' 2>&1 | tail -3
 
+# O estado vem em JSON e nao da tabela de texto do CLI. A tabela usa
+# bordas com "|" e larguras variaveis, e recortar coluna dela com awk
+# produziu lixo ("|=| |=|") na primeira versao -- o formato nao e contrato,
+# o JSON e.
+estados() {
+  cmp airflow tasks states-for-dag-run f1_pipeline_fim_a_fim "$EXEC" --output json 2>/dev/null \
+    | python3 -c 'import json,sys
+try:
+    linhas = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+print(" ".join(f"{t[\"task_id\"]}={t.get(\"state\") or \"-\"}" for t in sorted(linhas, key=lambda x: x["task_id"])))'
+}
+
+estado_da_execucao() {
+  cmp airflow dags list-runs -d f1_pipeline_fim_a_fim --output json 2>/dev/null \
+    | python3 -c 'import json,sys
+try:
+    linhas = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+alvo = sys.argv[1]
+for r in linhas:
+    if r.get("run_id") == alvo:
+        print(r.get("state") or "-"); break' "$EXEC"
+}
+
 marca "acompanhando (ate 45 min)"
 anterior=""
 for _ in $(seq 1 180); do
-  linhas=$(cmp airflow tasks states-for-dag-run f1_pipeline_fim_a_fim "$EXEC" 2>/dev/null \
-    | awk 'NR>2 && NF {printf "%s=%s ", $2, $4}')
-  estado=$(cmp airflow dags list-runs -d f1_pipeline_fim_a_fim --no-backfill 2>/dev/null \
-    | awk -v e="$EXEC" '$0 ~ e {print $3; exit}')
-  if [[ "$linhas $estado" != "$anterior" ]]; then
-    marca "  ${estado:-?} | ${linhas}"
-    anterior="$linhas $estado"
+  tarefas=$(estados)
+  estado=$(estado_da_execucao)
+  if [[ "$tarefas|$estado" != "$anterior" ]]; then
+    marca "  [${estado:-?}] ${tarefas}"
+    anterior="$tarefas|$estado"
   fi
   case "$estado" in
     success) marca "DAG CONCLUIDA COM SUCESSO"; break ;;
@@ -64,4 +89,12 @@ for t in aquecer_f1_api subir_dataflow esperar_dataflow_pronto disparar_gerador 
     cmp bash -lc "tail -25 /opt/airflow/logs/dag_id=f1_pipeline_fim_a_fim/run_id=${EXEC}/task_id=${t}/attempt=*.log" 2>&1 | sed 's/^/    /'
   fi
 done
+# O console serial e a unica janela quando nao ha SSH, e ele trunca e
+# acumula historico. Uma copia em arquivo e barata e salva a investigacao.
+{
+  echo "execucao: $EXEC"
+  echo "estado:   $(estado_da_execucao)"
+  echo "tarefas:  $(estados)"
+} > /var/log/f1-fim-a-fim.txt 2>&1
+marca "resultado tambem em /var/log/f1-fim-a-fim.txt"
 marca "FIM A FIM ENCERRADO"
