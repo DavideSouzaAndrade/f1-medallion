@@ -75,15 +75,45 @@ não por SSH. Dois motivos:
    organização, e desligá-lo seria enfraquecer a segurança da VM.
 2. Script de boot é reproduzível; comando digitado numa sessão não é.
 
-O script instala o Docker, baixa o repositório por **tarball HTTP** (o
-repositório é público, então não há credencial envolvida) e sobe o compose.
-É idempotente: um `reset` da VM refaz tudo sem reinstalar o que já existe.
+O script é [`provisionar-vm.sh`](provisionar-vm.sh): instala o Docker, baixa
+o repositório por **tarball HTTP** (o repositório é público, então não há
+credencial envolvida) e sobe o compose. É idempotente — um `reset` da VM
+refaz tudo sem reinstalar o que já existe, e o cache do Docker faz o
+rebuild levar segundos.
 
-Acompanhar sem SSH, pelo console serial:
+Criar a VM e instalar o script:
+
+```bash
+gcloud compute instances create f1-airflow \
+  --project=pdm-davi-2026 --zone=us-central1-a \
+  --machine-type=e2-medium \
+  --image-family=debian-12 --image-project=debian-cloud \
+  --boot-disk-size=30GB --boot-disk-type=pd-balanced \
+  --scopes=cloud-platform \
+  --service-account=f1-dataflow@pdm-davi-2026.iam.gserviceaccount.com
+
+gcloud compute instances add-metadata f1-airflow --zone=us-central1-a \
+  --metadata-from-file=startup-script=airflow/provisionar-vm.sh
+
+gcloud compute instances reset f1-airflow --zone=us-central1-a
+```
+
+Trocar o ramo que a VM baixa: a variável `RAMO` no topo do script.
+
+Rodar o fim a fim sem SSH, pelo mesmo mecanismo:
+[`rodar-fim-a-fim.sh`](rodar-fim-a-fim.sh), instalado como
+`startup-script` e disparado por um `reset`.
+
+Acompanhar sem SSH, pelo console serial — **filtrando por tempo**, porque o
+console acumula o histórico de todos os boots e é fácil ler o anterior
+pensando que é o atual:
 
 ```bash
 gcloud compute instances get-serial-port-output f1-airflow \
-  --zone=us-central1-a | grep 'command("/bin/bash")'
+  --zone=us-central1-a \
+  | awk -F' ' '$1 >= "'"$(date -u -v-10M +%Y-%m-%dT%H:%M:%S 2>/dev/null \
+      || date -u -d '10 min ago' +%Y-%m-%dT%H:%M:%S)"'"' \
+  | grep 'command("/bin/bash")'
 ```
 
 Duas armadilhas que esse caminho revelou e que estão resolvidas no script:
