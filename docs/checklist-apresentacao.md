@@ -38,7 +38,35 @@ curl -s -o /dev/null -w "%{http_code} em %{time_total}s\n" \
        "temp_ar":32.4,"umidade":37.5,"circuito":"Monza","circuit_type":"Permanent"}]}'
 ```
 
-### 2. Ligar a VM do Airflow 💰
+### 2. Subir o Airflow local, para a interface
+
+```bash
+cd airflow
+export GCLOUD_CONFIG="$HOME/.config/gcloud"
+mkdir -p logs && docker compose up -d --build   # interface: http://localhost:8080
+```
+
+A interface do Airflow da VM **não é alcançável**: ela escuta na 8080 da
+VM, o caminho normal é um túnel SSH, e o SSH não funciona para conta externa
+à organização do projeto (o OS Login exige
+`roles/compute.osLoginExternalUser` no nível da org — org `378548377305`,
+que nem o dono do projeto necessariamente administra).
+
+O Airflow local roda a **mesma** DAG, chamando o **mesmo** `gcloud` e o
+**mesmo** Beam, subindo o Dataflow no **mesmo** projeto. Muda só onde o
+scheduler mora. Então:
+
+| | para quê |
+|---|---|
+| VM `f1-airflow` | provar que a orquestração roda na nuvem |
+| Airflow local | a interface para mostrar ao vivo, com grafo e logs |
+
+Custo zero (é a sua máquina). **Não subir os dois ao mesmo tempo** — dois
+schedulers disparando a mesma DAG tentariam subir dois jobs do Dataflow na
+mesma assinatura, o que é cobrança dobrada. O `subir.sh` recusa o segundo,
+mas é melhor não depender disso.
+
+### 3. Ligar a VM do Airflow, se for mostrar a orquestração na nuvem 💰
 
 ```bash
 gcloud compute instances start f1-airflow --zone=us-central1-a
@@ -59,13 +87,13 @@ gcloud compute instances get-serial-port-output f1-airflow \
   --zone=us-central1-a | grep 'command("/bin/bash")' | tail -10
 ```
 
-### 3. Rodar o fim a fim uma vez, inteiro
+### 4. Rodar o fim a fim uma vez, inteiro
 
 Disparar a DAG `f1_pipeline_fim_a_fim` e deixar terminar. Serve para três
 coisas: aquecer tudo, deixar dado fresco no BI, e descobrir qualquer
 problema **com um dia de sobra**.
 
-### 4. Conferir que o BI tem o que mostrar
+### 5. Conferir que o BI tem o que mostrar
 
 ```sql
 SELECT origem, COUNT(*) AS voltas
@@ -86,12 +114,12 @@ WHERE tempo_previsto_s IS NOT NULL
 ORDER BY _ts_processamento DESC LIMIT 10;
 ```
 
-### 5. Abrir o front e clicar em tudo
+### 6. Abrir o front e clicar em tudo
 
 `https://f1-bi-frontend-ytz2c7b2wq-uc.a.run.app` — as quatro telas:
 Histórico, Ao vivo, Previsto × Real, Saúde.
 
-### 6. Garantir que não há job do Dataflow de pé 💰
+### 7. Garantir que não há job do Dataflow de pé 💰
 
 ```bash
 gcloud dataflow jobs list --region=us-central1 --status=active
@@ -157,6 +185,7 @@ gcloud dataflow jobs list --region=us-central1 --status=active   # tem que vir v
 | nenhuma volta chegando | job do Dataflow não está consumindo | `gcloud dataflow jobs list --region=us-central1 --status=active` |
 | `subir_dataflow` falha com "já existe job ativo" | sobrou job da véspera | `ESPERAR=1 bash streaming/parar.sh` e disparar de novo |
 | DLQ com muita coisa | normal: o gerador injeta 1% de propósito | mostrar como recurso, não como defeito |
+| `Could not resolve host` / `NameResolutionError` | **a rede, não o projeto** | repetir o comando; aconteceu duas vezes em 01/11 e passou sozinho |
 
 **A carta na manga:** se o ao vivo falhar, o BigQuery tem as execuções
 anteriores. `SELECT ... FROM f1_stream.voltas WHERE tempo_previsto_s IS NOT
