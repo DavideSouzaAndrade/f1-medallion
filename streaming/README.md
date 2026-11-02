@@ -22,9 +22,10 @@ Pub/Sub f1-openf1-dataflow   (7 topicos brutos, fora de ordem, ~27 mil msg/corri
 ```
 
 O formato das mensagens está em
-[docs/contrato-openf1.md](../docs/contrato-openf1.md). As decisões de
-projeto, em [docs/plano-frente-b.md](../docs/plano-frente-b.md), e o relato
-do bug de reordenação em
+[docs/contrato-openf1.md](../docs/contrato-openf1.md), e o da volta gravada
+em [docs/contrato-evento.md](../docs/contrato-evento.md). As decisões de
+projeto estão na seção [Decisões](#decisões), e o relato do bug de
+reordenação em
 [docs/caso-carencia-reordenacao.md](../docs/caso-carencia-reordenacao.md).
 
 ## Por que montar a volta aqui

@@ -10,10 +10,10 @@
 >
 > | onde | o quê |
 > |---|---|
-> | [`streaming/README.md`](../streaming/README.md) | o pipeline atual, decisões e resultados |
-> | [`docs/contrato-openf1.md`](contrato-openf1.md) | o contrato v2 das mensagens |
-> | [`docs/caso-carencia-reordenacao.md`](caso-carencia-reordenacao.md) | os bugs achados, as otimizações e a comparação local × Dataflow |
-> | [`airflow/README.md`](../airflow/README.md) | a orquestração e por que não Composer |
+> | [`streaming/README.md`](../../streaming/README.md) | o pipeline atual, decisões e resultados |
+> | [`docs/contrato-openf1.md`](../contrato-openf1.md) | o contrato v2 das mensagens |
+> | [`docs/caso-carencia-reordenacao.md`](../caso-carencia-reordenacao.md) | os bugs achados, as otimizações e a comparação local × Dataflow |
+> | [`airflow/README.md`](../../airflow/README.md) | a orquestração e por que não Composer |
 > | a seção **Partes 2 e 3** no fim deste arquivo | o escopo que substituiu o plano v1 |
 >
 > O plano v1 fica registrado porque as decisões dele seguem valendo
@@ -23,7 +23,7 @@
 
 Registro das decisões e do passo a passo da parte do streaming que lê o
 Pub/Sub e grava no BigQuery. O formato das mensagens está em
-[contrato-evento.md](contrato-evento.md); este documento é o *como*.
+[contrato-evento.md](../contrato-evento.md); este documento é o *como*.
 
 ---
 

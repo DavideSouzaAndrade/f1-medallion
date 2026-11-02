@@ -26,8 +26,8 @@ TOPICOS = ("meetings", "sessions", "weather", "stints", "pit", "intervals", "lap
 
 # --- ritmo do replay ---------------------------------------------------------
 
-# Quantas vezes mais rapido que a corrida real. Uma corrida de ~80 min com
-# fator 30 vira ~3 min de mensagens: cabe na demonstracao ao vivo.
+# Quantas vezes mais rapido que a corrida real. Uma corrida de ~2 h com
+# fator 30 vira ~4 min de mensagens. A DAG do Airflow usa fator 10 (~14 min).
 FATOR_PADRAO = float(os.environ.get("FATOR", "30"))
 
 # Teto para a espera entre duas mensagens. Bandeira vermelha para a corrida

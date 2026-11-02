@@ -166,7 +166,7 @@ with DAG(
     )
 
     # O gerador e um Cloud Run Job: escala a zero, e so cobra o tempo do
-    # replay. Com fator 30, a corrida inteira sai em ~4 min.
+    # replay. No fator 10 do padrao, a corrida inteira sai em ~14 min.
     disparar_gerador = BashOperator(
         task_id="disparar_gerador",
         # --minutos so entra se vier na configuracao: o gerador trata a

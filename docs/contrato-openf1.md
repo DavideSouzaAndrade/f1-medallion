@@ -1,4 +1,4 @@
-# Contrato das mensagens brutas da OpenF1 (v2)
+# Contrato das mensagens brutas da OpenF1 (entrada do streaming, v2)
 
 O acordo entre quem publica dados de corrida no Pub/Sub e o Dataflow que os
 consome. A regra que define tudo aqui: **a mensagem é igual à que a OpenF1
@@ -7,9 +7,9 @@ replay de uma corrida guardada na Bronze; no futuro pode ser uma ponte que
 assina o MQTT da OpenF1 e repassa as mensagens. Para o Dataflow, as duas
 fontes são indistinguíveis.
 
-A v1 ([contrato-evento.md](contrato-evento.md)) descrevia uma volta já
-montada, no formato da Silver. Ela deixa de ser o que trafega no Pub/Sub e
-passa a ser o que o Dataflow produz depois de montar a volta.
+Na parte 2, o contrato v1 fazia trafegar no Pub/Sub uma volta já montada, no
+formato da Silver. Esse formato agora é a **saída** do Dataflow, descrita
+em [contrato-evento.md](contrato-evento.md); este documento é a **entrada**.
 
 Fontes: documentação da OpenF1 ([openf1.org/docs](https://openf1.org/docs),
 [tempo real](https://openf1.org/auth.html)), o código de ingestão ao vivo da
@@ -148,8 +148,8 @@ das mensagens (`--injetar-invalidos`), com o atributo `injetado`:
 ## O que o Dataflow entrega
 
 A partir dessas mensagens, o Dataflow monta a volta (stint, clima e gap médio
-de cada volta concluída) e produz o registro descrito na
-[v1](contrato-evento.md): mesmos campos e regras, e mesma tabela
+de cada volta concluída) e produz o registro descrito no
+[contrato da volta montada](contrato-evento.md): mesmos campos e regras, e mesma tabela
 `f1_stream.voltas`. É isso que mantém a estrutura do streaming igual à da
 `silver_voltas`.
 

@@ -1,7 +1,7 @@
-"""Empacota validacao.py para o worker do Dataflow.
+"""Empacota contrato.py, montagem.py e predicao.py para o worker do Dataflow.
 
-O pipeline.py vira o arquivo principal e e enviado sozinho; o contrato.py e
-o montagem.py, que ele importa, nao vao junto. Sem este setup.py o job sobe
+O pipeline.py vira o arquivo principal e e enviado sozinho; os modulos que
+ele importa nao vao junto. Sem este setup.py o job sobe
 e morre com ModuleNotFoundError na primeira mensagem.
 
 Usado pelo --setup_file do Beam, nao para instalar nada a mao. As

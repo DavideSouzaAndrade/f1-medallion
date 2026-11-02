@@ -7,10 +7,10 @@ começar com o contexto completo, sem precisar reconstruir a conversa.
 Os detalhes ficam nos documentos de referência; este registro é o resumo e o
 porquê:
 
-- [contrato-openf1.md](contrato-openf1.md): o que **entra** no Pub/Sub.
-- [contrato-evento.md](contrato-evento.md): o que o Dataflow **grava** em
+- [contrato-openf1.md](../contrato-openf1.md): o que **entra** no Pub/Sub.
+- [contrato-evento.md](../contrato-evento.md): o que o Dataflow **grava** em
   `f1_stream.voltas`.
-- [producer/README.md](../producer/README.md): como rodar o gerador.
+- [producer/README.md](../../producer/README.md): como rodar o gerador.
 
 ---
 
@@ -156,7 +156,7 @@ Resumo do que os dois contratos pedem. A ordem é sugestão, não decisão.
    voltas recebidas até o momento.** Até a parte 2 quem calculava isso era o
    `producer/evento.py` (apagado; está no histórico, commit `78f9de8`).
 7. **Gravar** em `f1_stream.voltas` no formato do
-   [contrato-evento.md](contrato-evento.md), com
+   [contrato-evento.md](../contrato-evento.md), com
    `evento_id = replay_id + ":" + _key da volta` e `ts_evento` = o
    `publish_time` da versão final. Com isso a `vw_voltas_unificada`
    continua deduplicando e juntando batch e streaming.
@@ -183,7 +183,7 @@ Partes que devem continuar valendo: a escrita em `f1_stream.voltas` e
 Propostas minhas, a confirmar por quem constrói o Dataflow:
 
 - A regra de identificação da volta (`evento_id`, `ts_evento`) da seção
-  "Identificação" do [contrato-evento.md](contrato-evento.md).
+  "Identificação" do [contrato-evento.md](../contrato-evento.md).
 - Quanto esperar antes de montar a volta (janela/gatilho).
 - Como calcular a mediana parcial da corrida para o filtro de volta limpa.
 

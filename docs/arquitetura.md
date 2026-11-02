@@ -326,8 +326,6 @@ simultâneas.
 | [`contrato-openf1.md`](contrato-openf1.md) | o que trafega no Pub/Sub |
 | [`contrato-evento.md`](contrato-evento.md) | o que o Dataflow grava |
 | [`caso-carencia-reordenacao.md`](caso-carencia-reordenacao.md) | os bugs de ordenação, local × nuvem, as otimizações |
-| [`achados-no-front-de-bi.md`](achados-no-front-de-bi.md) | três achados na interface |
-| [`checklist-apresentacao.md`](checklist-apresentacao.md) | o que fazer na véspera e no dia |
-| [`plano-frente-b.md`](plano-frente-b.md) | o plano do Dataflow, do v1 ao v2 |
+| [`bastidores/`](bastidores/README.md) | registros internos da equipe: planos, passagens entre frentes, roteiro da apresentação |
 | [`analise-exploratoria.md`](analise-exploratoria.md) | qualidade do dado medida na Bronze |
 | [`perfil-dados-bronze.md`](perfil-dados-bronze.md) | campo a campo dos 18 endpoints |
