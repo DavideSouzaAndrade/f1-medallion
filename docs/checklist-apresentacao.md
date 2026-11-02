@@ -173,8 +173,35 @@ curl -s -o /dev/null -w "%{http_code} em %{time_total}s\n" \
 
 ### A demonstração ao vivo
 
-**Disparar a DAG e falar enquanto ela roda.** A sequência leva ~12 minutos,
-e cada tarefa dá assunto:
+**Disparar a DAG e falar enquanto ela roda.** Com o padrão novo — corrida
+inteira, fator 10 — a sequência leva **~25 minutos**, dos quais **~14 são
+de replay**: tempo de mostrar, explicar e responder pergunta.
+
+Três formas de disparar, da mais visual à mais direta:
+
+```bash
+# 1. pela interface do Airflow (melhor para apresentar)
+gcloud compute start-iap-tunnel f1-airflow 8080 \
+  --local-host-port=localhost:8080 --zone=us-central1-a
+#    http://localhost:8080  ->  f1_pipeline_fim_a_fim  ->  botão ▶
+
+# 2. pela API REST, com parâmetros
+curl -s -u admin:admin -X POST -H "Content-Type: application/json" \
+  -d '{"conf":{"session_key":"11361","fator":"10"}}' \
+  http://localhost:8080/api/v1/dags/f1_pipeline_fim_a_fim/dagRuns
+
+# 3. para uma demonstração curta, acelere: fator 30 => ~5 min de replay
+#    {"conf":{"session_key":"11361","fator":"30"}}
+```
+
+| parâmetro | padrão | efeito |
+|---|---|---|
+| `fator` | `10` | aceleração: 10 dá ~14 min de replay, 30 dá ~5 min |
+| `minutos` | vazio | vazio = corrida inteira; `30` corta nos 30 primeiros minutos |
+| `session_key` | `11361` | a corrida |
+| `injetar_invalidos` | `0.01` | fração corrompida de propósito, para a DLQ |
+
+Cada tarefa dá assunto:
 
 | tarefa | o que contar enquanto roda |
 |---|---|
@@ -188,6 +215,11 @@ e cada tarefa dá assunto:
 **Enquanto o gerador publica**, abrir a tela *Ao vivo* do front: as voltas
 aparecem com `tempo_previsto_s` preenchido. É a prova de que o Dataflow
 chamou a API durante o processamento — os 35% da nota.
+
+A faixa no topo da tela diz **"Replay · em curso"** enquanto chega evento, e
+**"Replay · encerrado"** quando para. Vale apontar: o sistema distingue
+procedência (replay ou feed real, que não muda) de atividade (acontecendo
+ou não, que muda sozinha), e só a primeira está gravada na linha.
 
 **Se alguém perguntar "e se a API cair?"**: a volta é gravada com previsão
 nula e o painel a mostra como pendente. O evento nunca se perde. Está
