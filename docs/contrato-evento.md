@@ -48,6 +48,7 @@ Exemplo com dados reais (piloto 44, volta 23, GP da Itália de 2026):
 |-------|-----------------|-------------|-------|
 | `evento_id` | STRING | sim | `replay_id:_key` da volta; chave de deduplicação |
 | `replay_id` | STRING | sim | Atributo da mensagem; separa dois replays da mesma corrida (`openf1` ao vivo) |
+| `fonte` | STRING | não | `replay` (corrida reproduzida da Bronze) ou `openf1` (feed ao vivo). É **procedência**, não estado: um replay encerrado continua sendo replay. Se a execução está em curso se deriva de `MAX(ts_evento)`, não desta coluna |
 | `ts_evento` | TIMESTAMP | sim | `publish_time` da versão final da volta, em UTC; define a partição |
 | `session_key`, `driver_number`, `year` | INT64 | sim | — |
 | `lap_number` | INT64 | sim | Maior que 0 |

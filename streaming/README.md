@@ -236,6 +236,24 @@ apareciam como predição pendente no painel do BI sem nada estar errado),
 `volta_no_stint` passou a numerar o mesmo conjunto que a Gold numera, e a
 predição deixou de precisar de um campo auxiliar viajando com a linha.
 
+**A linha guarda de onde veio, mas não se ainda está chegando.** O contrato
+v2 carrega o atributo `fonte` (`replay` | `openf1`) em toda mensagem, e o
+pipeline o descartava — o BigQuery guardava o dado e perdia o contexto
+dele. Agora é a coluna `fonte`.
+
+Procedência e atividade são coisas diferentes e só uma pertence à linha:
+
+| | o que é | onde mora | muda? |
+|---|---|---|---|
+| procedência | replay ou feed real | coluna `fonte` | nunca |
+| atividade | acontecendo agora ou acabou | derivado de `MAX(ts_evento)` | sozinha |
+
+Um replay encerrado **continua sendo replay** — ele só deixa de estar em
+curso. Gravar atividade numa coluna criaria dado que mente com o passar do
+tempo: uma volta gravada às 23:00 estava em curso às 23:00 e é histórico às
+23:10, sem que nada nela mude. Quem deriva isso é a API de BI, contra
+`EM_CURSO_S`.
+
 **Volta sem contexto da sessão espera, e só depois vai para a DLQ.**
 `year` e `circuito` são `NOT NULL`. Mandar a volta para a DLQ porque a
 mensagem de contexto ficou dois segundos atrás seria perder dado por nada:
