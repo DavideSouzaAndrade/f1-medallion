@@ -172,8 +172,17 @@ marca "o venv do Beam responde: $(docker compose exec -T scheduler /opt/beam/bin
 # A interface, e nao so o /health. O /health nao passa por sessao nem CSRF,
 # entao ele responde 200 com o login quebrado -- foi assim que uma chave de
 # sessao vazia passou despercebida ate alguem tentar entrar.
-codigo=$(docker compose exec -T scheduler \
-  python -c "import urllib.request;print(urllib.request.urlopen('http://webserver:8080/login/',timeout=20).status)" 2>/dev/null || echo "erro")
+# Com espera: o webserver cria o webserver_config.py na primeira subida e
+# leva algumas dezenas de segundos a mais que o scheduler. Conferir uma vez
+# so acusou falha que nao existia.
+codigo=erro
+for _ in $(seq 1 18); do
+  codigo=$(docker compose exec -T scheduler python -c \
+    "import urllib.request;print(urllib.request.urlopen('http://webserver:8080/login/',timeout=20).status)" \
+    2>/dev/null || echo "erro")
+  [[ "$codigo" == "200" ]] && break
+  sleep 10
+done
 marca "pagina de login: HTTP ${codigo}"
 if [[ "$codigo" != "200" ]]; then
   marca "FALHA: a interface nao abre. Log do webserver:"
