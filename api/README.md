@@ -1,7 +1,12 @@
 # API do modelo de degradação de pneu (parte 2)
 
-Serve o modelo `f1_gold.modelo_degradacao_pneu` (BigQuery ML, regressão linear) no Cloud Run,
-seguindo o contrato v1 combinado com o gerador (A) e o Dataflow (B).
+Serve o modelo `f1_gold.modelo_degradacao_pneu` (BigQuery ML, regressão linear) no Cloud Run.
+
+O contrato desta API é o **v1 dela própria** (`POST /predict`, descrito abaixo) e segue
+válido. Não confundir com o contrato das mensagens do Pub/Sub, que passou de v1 para v2
+quando o gerador deixou de publicar a volta pronta e passou a publicar o dado bruto da
+OpenF1 — isso mudou a frente B, não esta API. Quem chama o `/predict` é o Dataflow,
+durante o processamento de cada volta.
 
 **URL:** https://f1-api-418113305910.us-central1.run.app (documentação interativa em `/docs`)
 
