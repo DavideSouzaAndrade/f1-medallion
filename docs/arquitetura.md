@@ -252,16 +252,20 @@ desligada entre demonstrações: ~US$ 1–3/mês.
 Corrida 11361 (GP da Itália 2026, 111 minutos), comparada volta a volta com
 a `silver_voltas` da mesma corrida.
 
+Corrida completa, 111 minutos, reproduzida a fator 10 (~14 min de replay):
+
 | medida | valor |
 |---|---|
-| voltas completas iguais ao lote | **127 / 127** em duração, composto, idade de pneu, temperatura e gap |
-| soma dos setores vs duração | 80 / 80 dentro de 1 s |
-| `evento_id` duplicado | zero |
-| latência mediana, Pub/Sub → BigQuery (predição inclusa) | **4,15 s** |
-| latência p95 | 7,33 s |
-| erro do modelo em volta de corrida normal | **1,32 s** sobre 88,5 s (1,5%) |
-| DLQ | 40 mensagens injetadas, 4 motivos, nenhum evento perdido |
-| custo de uma execução completa | ~US$ 0,04 |
+| voltas processadas | **1.055** — a corrida inteira |
+| `evento_id` duplicado | **zero** |
+| voltas completas iguais ao lote | **1.052 / 1.052** em duração, composto e temperatura |
+| soma dos setores vs duração | **1.003 / 1.003** dentro de 1 s |
+| voltas aptas / com previsão | **938 / 938** |
+| latência mediana, Pub/Sub → BigQuery (predição inclusa) | **1,70 s** |
+| latência p95 | 3,35 s |
+| erro do modelo (MAE) | **1,13 s** sobre voltas de ~88 s (1,3%) |
+| DLQ | 265 mensagens injetadas, 4 motivos, nenhum evento perdido |
+| custo de uma execução completa | ~US$ 0,06 |
 
 E uma comparação que vale como lição:
 

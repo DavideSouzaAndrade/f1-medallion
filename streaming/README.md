@@ -356,7 +356,31 @@ A partida a frio não cabe no timeout de leitura de 10 s do pipeline — é por
 isso que a DAG aquece a API **antes** de disparar o gerador, e é por isso
 que o dia da apresentação pede `DEMO=1 bash api/deploy.sh`.
 
-### Rodado pelo Airflow, na nuvem (01/11/2026, 21:11 UTC)
+### Corrida inteira, pelo Airflow, na nuvem (02/11/2026)
+
+A corrida 11361 completa (111 minutos, fator 10 → ~14 min de replay),
+disparada pela API REST do Airflow na VM.
+
+| | |
+|---|---|
+| voltas / `evento_id` distintos | **1.055 / 1.055** — a corrida inteira, zero duplicata |
+| voltas completas iguais ao lote | **1.052 / 1.052** em `duracao_s`, `composto`, `temp_pista` |
+| soma dos setores vs duração | **1.003 / 1.003** dentro de 1 s |
+| voltas aptas / com previsão | **938 / 938** — zero aguardando |
+| latência mediana / p95 | **1,70 s** / 3,35 s |
+| erro do modelo (MAE) | **1,13 s** sobre voltas de ~88 s (1,3%) |
+| DLQ | 265 injetadas, nos 4 motivos do contrato |
+| procedência gravada | `replay` em 1.055 de 1.055 |
+
+A latência caiu 2,4× em relação à execução anterior (4,15 s), e o motivo é
+o ritmo: a 32 mensagens/s a reordenação cabe na carência de 1 s da volta
+completa, o que não acontecia a 95 mensagens/s. **Replay mais lento é
+replay mais correto e mais rápido de processar** — o oposto do que a
+intuição sugere.
+
+Auditoria completa: `bash streaming/auditar.sh`.
+
+### Execução anterior, recortada em 45 minutos (01/11/2026, 21:11 UTC)
 
 A mesma corrida, disparada pela DAG `f1_pipeline_fim_a_fim` num Airflow
 containerizado numa `e2-medium` do Compute Engine — não da máquina de

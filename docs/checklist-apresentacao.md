@@ -260,11 +260,13 @@ de dar tudo certo na hora.
 
 | | |
 |---|---|
-| voltas conferidas contra o lote | **127 de 127** iguais em duração, composto, idade de pneu, temperatura e gap |
-| duplicatas | zero (`evento_id` determinístico) |
-| latência mediana, Pub/Sub → BigQuery, predição incluída | **4,15 s** |
-| latência p95 | 7,33 s |
-| erro do modelo em volta de corrida normal | **1,32 s** sobre 88,5 s (1,5%) |
+| voltas processadas na corrida inteira | **1.055**, zero duplicata |
+| voltas conferidas contra o lote | **1.052 de 1.052** iguais em duração, composto e temperatura |
+| soma dos setores vs duração | **1.003 de 1.003** dentro de 1 s |
+| voltas aptas com previsão | **938 de 938** |
+| latência mediana, Pub/Sub → BigQuery, predição incluída | **1,70 s** |
+| latência p95 | 3,35 s |
+| erro do modelo (MAE) na corrida inteira | **1,13 s** sobre voltas de ~88 s (1,3%) |
 | mensagens por corrida | ~27.000, ~110/s no fator 30 |
 | mensagens por volta emitida | ~26 |
 | custo de uma rodada completa | ~US$ 0,04 |
