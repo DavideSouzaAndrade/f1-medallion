@@ -83,6 +83,21 @@ curl -fsSL "https://api.github.com/repos/${REPO}/tarball/${RAMO}" \
 rm -rf "$RAIZ" && mv /tmp/f1 "$RAIZ"
 marca "repositorio em $RAIZ ($(find "$RAIZ" -type f | wc -l) arquivos)"
 
+# O startup-script e uma COPIA nos metadados, nao uma referencia ao
+# repositorio: editar airflow/provisionar-vm.sh e dar push NAO atualiza a
+# VM. Perdi um ciclo inteiro com isso -- reiniciei a VM achando que ela
+# pegaria a correcao, e ela rodou a versao antiga.
+#
+# Agora o script avisa quando esta defasado em relacao ao repositorio que
+# acabou de baixar. Nao se auto-aplica de proposito: trocar o proprio
+# codigo no meio da execucao e pior que avisar.
+if ! diff -q <(tail -n +1 "$0") "$RAIZ/airflow/provisionar-vm.sh" >/dev/null 2>&1; then
+  marca "AVISO: o startup-script dos metadados difere do repositorio."
+  marca "  Para atualizar:"
+  marca "    gcloud compute instances add-metadata f1-airflow --zone=us-central1-a \\"
+  marca "      --metadata-from-file=startup-script=airflow/provisionar-vm.sh"
+fi
+
 mkdir -p "$RAIZ/airflow/logs"
 # O container roda como uid 50000 (usuario airflow da imagem oficial), e o
 # repositorio baixado pertence ao root. O Beam escreve o egg-info e o sdist

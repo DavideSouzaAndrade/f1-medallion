@@ -148,7 +148,21 @@ gcloud compute instances add-metadata f1-airflow --zone=us-central1-a \
 gcloud compute instances reset f1-airflow --zone=us-central1-a
 ```
 
-Trocar o ramo que a VM baixa: a variável `RAMO` no topo do script.
+Trocar o ramo que a VM baixa: o metadado `f1-ramo` da instância.
+
+**O `startup-script` é uma cópia nos metadados, não uma referência ao
+repositório.** Editar `airflow/provisionar-vm.sh` e dar push **não**
+atualiza a VM — é preciso reenviar:
+
+```bash
+gcloud compute instances add-metadata f1-airflow --zone=us-central1-a \
+  --metadata-from-file=startup-script=airflow/provisionar-vm.sh
+gcloud compute instances reset f1-airflow --zone=us-central1-a
+```
+
+O script avisa no console serial quando está defasado em relação ao
+repositório que acabou de baixar. Ele não se auto-aplica de propósito:
+trocar o próprio código no meio da execução é pior que avisar.
 
 Rodar o fim a fim sem SSH, pelo mesmo mecanismo:
 [`rodar-fim-a-fim.sh`](rodar-fim-a-fim.sh), instalado como
