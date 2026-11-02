@@ -67,6 +67,9 @@ export interface Replay {
   circuito: string | null;
   eventos: number;
   ultimo_evento: string;
+  /** Contagens da execução inteira, do BigQuery. O buffer do SSE só tem as voltas mais recentes. */
+  aptos_modelo: number;
+  com_predicao: number;
   voltas_na_corrida: number | null;
   /** "replay" (corrida reproduzida) ou "openf1" (feed ao vivo). Procedência: imutável. */
   fonte: string;

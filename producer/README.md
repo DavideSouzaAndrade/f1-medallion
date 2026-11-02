@@ -29,6 +29,8 @@ O formato das mensagens está em
 | [`cronograma.py`](cronograma.py) | Decide o que a OpenF1 publicaria e quando: as versões de cada volta e de cada stint, na ordem da corrida |
 | [`corrupcao.py`](corrupcao.py) | Copias quebradas de propósito, para a demonstração da DLQ |
 | [`publisher.py`](publisher.py) | Publica no ritmo da corrida acelerada |
+| [`injetar_dlq.py`](injetar_dlq.py) | Publica na hora uma mensagem quebrada de cada tipo, para mostrar a DLQ ao vivo |
+| [`parar.sh`](parar.sh) | Interrompe o replay em andamento (cancela a execução do Cloud Run Job) |
 
 Uma corrida (GP da Itália de 2026) vira ~27 mil mensagens: 22 mil de
 `intervals`, 4,1 mil versões de `laps`, 1 mil de `stints` e o resto de
@@ -77,6 +79,31 @@ gcloud run jobs execute f1-gerador --region=us-central1 \
 | `--minutos N` | publica só os N primeiros minutos depois da largada |
 | `--injetar-invalidos F` | fração de cópias quebradas extras, de 0 a 1 |
 | `--semente` | repete o mesmo sorteio de inválidos numa nova execução |
+
+### Corrida em tempo real, até mandar parar
+
+Com `--fator 1` a corrida sai no ritmo real (~1h30, umas 14 voltas por
+minuto): é o modo da apresentação, ligado antes e deixado rodando. Pela DAG
+do Airflow, com `{"session_key": "11253", "fator": "1"}`. Para interromper:
+
+```bash
+bash producer/parar.sh
+```
+
+O script cancela a execução do gerador; a DAG não tenta de novo e drena o
+Dataflow sozinha. Prefira uma corrida seca e sem bandeira vermelha: a 11361
+(Monza) fica 32 min sem nenhuma volta no ritmo real.
+
+### Mensagens para a DLQ, sob demanda
+
+```bash
+cd producer && python injetar_dlq.py          # uma de cada tipo
+python injetar_dlq.py --tipo json_quebrado    # só uma
+```
+
+Com o Dataflow ligado, chegam a `f1_stream.voltas_dlq` em ~1 s, cada uma com
+o seu motivo, e aparecem no gráfico "Rejeitados por motivo" da tela Saúde do
+BI. O script imprime a consulta para mostrá-las no BigQuery.
 
 ## Como conferir
 

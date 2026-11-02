@@ -171,7 +171,55 @@ curl -s -o /dev/null -w "%{http_code} em %{time_total}s\n" \
   https://f1-api-ytz2c7b2wq-uc.a.run.app/health
 ```
 
-### A demonstração ao vivo
+### O plano: uma corrida em tempo real, ligada antes
+
+Ensaiado em 02/11, da máquina do Fred, com o Airflow local.
+
+**45 a 60 min antes de entrar**, disparar a DAG com uma corrida seca e sem
+bandeira vermelha, no ritmo real:
+
+```bash
+curl -s -u admin:admin -X POST -H "Content-Type: application/json" \
+  -d '{"conf":{"session_key":"11253","fator":"1","injetar_invalidos":"0.01"}}' \
+  http://localhost:8080/api/v1/dags/f1_pipeline_fim_a_fim/dagRuns
+```
+
+- A 11253 é o GP do Japão de 2026: ~1h33 de replay no ritmo real (cabe no
+  limite de 2 h do job), 1.108 voltas, nenhuma volta com pneu de chuva e no
+  máximo 1,6 min sem volta. A 9839 (Abu Dhabi 2025) também
+  serve. **Não usar a 11361 (Monza)**: a bandeira vermelha deixa a tela 32 min
+  sem nenhuma volta no ritmo real.
+- O replay começa ~4 min depois do disparo (API, Dataflow, worker) e chega
+  ~14 voltas por minuto. A tela Ao vivo se mexe o tempo todo.
+- A volta 1 recebe previsão ruim (no começo da corrida a mediana parcial ainda
+  não filtra a largada). Mais um motivo para disparar com antecedência: na
+  hora da apresentação ela já ficou para trás.
+
+**Para mostrar a DLQ na hora**, com o professor olhando:
+
+```bash
+cd producer && .venv/bin/python injetar_dlq.py
+```
+
+Publica uma volta real quebrada de cada um dos quatro jeitos do contrato. Em
+~1 s elas estão em `f1_stream.voltas_dlq`, cada uma com o motivo; mostrar o
+gráfico "Rejeitados por motivo" na tela Saúde e a consulta que o script
+imprime, que traz a mensagem crua ao lado do motivo.
+
+**Para parar, depois da apresentação:**
+
+```bash
+bash producer/parar.sh
+```
+
+Cancela a execução do gerador. A DAG não tenta de novo (a tarefa do gerador
+tem `retries=0`) e drena o Dataflow sozinha em ~4 min; a execução termina
+como `success`. Conferido no ensaio: nenhuma execução nova do gerador foi
+criada depois do cancelamento.
+
+### A demonstração ao vivo (replay acelerado)
+
+O jeito anterior, ainda válido para um teste rápido.
 
 **Disparar a DAG e falar enquanto ela roda.** Com o padrão novo — corrida
 inteira, fator 10 — a sequência leva **~25 minutos**, dos quais **~14 são
@@ -228,7 +276,8 @@ testado em `streaming/test_predicao.py`, nos cinco modos de falha.
 ### Depois da apresentação 💰
 
 ```bash
-ESPERAR=1 bash streaming/parar.sh
+bash producer/parar.sh            # se a corrida em tempo real ainda estiver rodando
+ESPERAR=1 bash streaming/parar.sh # só se a DAG não tiver drenado sozinha
 gcloud compute instances stop f1-airflow --zone=us-central1-a
 gcloud run services update f1-api --region=us-central1 --min-instances=0
 gcloud dataflow jobs list --region=us-central1 --status=active   # tem que vir vazio

@@ -60,6 +60,8 @@ def test_replays_trazem_o_total_de_voltas_da_corrida(client):
     time.sleep(0.4)
     replays = client.get("/api/stream/replays").json()
     assert replays and all(r["voltas_na_corrida"] >= r["eventos"] > 0 for r in replays)
+    # As contagens da execução inteira, que o placar do Ao vivo usa no lugar do buffer do SSE.
+    assert all(r["eventos"] >= r["aptos_modelo"] >= r["com_predicao"] >= 0 for r in replays)
 
 
 def test_batch_e_stream_separados(client):

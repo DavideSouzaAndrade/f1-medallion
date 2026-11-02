@@ -169,6 +169,12 @@ with DAG(
     # replay. No fator 10 do padrao, a corrida inteira sai em ~14 min.
     disparar_gerador = BashOperator(
         task_id="disparar_gerador",
+        # Sem nova tentativa, como o proprio Cloud Run Job (--max-retries=0):
+        # tentar de novo recomecaria o replay do zero e publicaria a corrida
+        # duplicada. E e isto que faz o producer/parar.sh funcionar: cancelar
+        # a execucao derruba esta tarefa uma vez so, e a drenar_dataflow
+        # (ALL_DONE) desliga o Dataflow em seguida.
+        retries=0,
         # --minutos so entra se vier na configuracao: o gerador trata a
         # ausencia dele como "a corrida inteira", e passar vazio seria erro
         # de argumento.

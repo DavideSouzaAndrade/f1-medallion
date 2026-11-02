@@ -139,6 +139,14 @@ sorteio = random.Random(1)
 conferir(all(sortear_invalido(sorteio, 0) is None for _ in range(100)), "fracao 0 nunca injeta")
 conferir(all(sortear_invalido(sorteio, 1) in TIPOS_INVALIDOS for _ in range(100)), "fracao 1 sempre injeta")
 
+# --- injecao sob demanda (injetar_dlq.py) -------------------------------------------
+from injetar_dlq import VOLTA_EXEMPLO, mensagens_quebradas
+ids = iter(range(1, 100))
+quebradas = mensagens_quebradas(list(TIPOS_INVALIDOS), lambda: next(ids))
+conferir([t for t, _, _ in quebradas] == list(TIPOS_INVALIDOS), "injetar_dlq gera um de cada tipo, na ordem pedida")
+conferir(len({c for _, c, _ in quebradas}) == len(TIPOS_INVALIDOS), "cada tipo quebra a volta de um jeito diferente")
+conferir(VOLTA_EXEMPLO["lap_number"] == 23 and "_key" not in VOLTA_EXEMPLO, "a volta do exemplo e o registro da Bronze, sem _key")
+
 print()
 if falhas:
     print(f"{len(falhas)} falha(s)")

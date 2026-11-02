@@ -34,16 +34,23 @@ export default function AoVivo({ vivo }: { vivo: EstadoAoVivo }) {
     () => dominioRobusto(ritmo.flatMap((l) => Object.entries(l).filter(([k, v]) => k !== "volta" && v != null).map(([, v]) => v as number))),
     [ritmo]);
 
-  // Total de voltas da corrida (Silver), para o progresso do replay. Só atualiza enquanto há replay.
+  // Contagens e total de voltas da corrida (Silver) vêm da API. Só atualiza enquanto há replay.
   const replaysApi = useApi<Replay[]>("/api/stream/replays", replayId ? {} : null, 5000);
-  const totalVoltas = replaysApi.dados?.find((r) => r.replay_id === replayId)?.voltas_na_corrida ?? null;
-  const progresso = totalVoltas ? Math.min(100, Math.round((100 * eventos.length) / totalVoltas)) : null;
+  const meta = replaysApi.dados?.find((r) => r.replay_id === replayId);
+  const totalVoltas = meta?.voltas_na_corrida ?? null;
+
+  // O placar conta a execução inteira, não o buffer do SSE: o buffer guarda só as últimas
+  // voltas (MAX_EVENTOS) e, ao abrir a aba, recebe só as mais recentes. Contar por ele fazia
+  // o placar travar em 600 no meio da corrida. O max() cobre os até 5 s em que o SSE já
+  // entregou voltas que a consulta de /replays ainda não viu.
+  const recebidas = Math.max(meta?.eventos ?? 0, eventos.length);
+  const aptos = Math.max(meta?.aptos_modelo ?? 0, eventos.filter((e) => e.apto_modelo).length);
+  const comPrevisao = Math.max(meta?.com_predicao ?? 0, eventos.filter((e) => e.tempo_previsto_s != null).length);
+  const progresso = totalVoltas ? Math.min(100, Math.round((100 * recebidas) / totalVoltas)) : null;
 
   const ultimo = eventos[eventos.length - 1];
   const latencias = eventos.map((e) => e.latencia_ms).filter((x): x is number => x != null).sort((a, b) => a - b);
   const mediana = latencias.length ? latencias[Math.floor(latencias.length / 2)] : null;
-  const aptos = eventos.filter((e) => e.apto_modelo).length;
-  const comPrevisao = eventos.filter((e) => e.tempo_previsto_s != null).length;
   // Medido pelo TS do evento, e nao por quando ele chegou nesta aba: o SSE
   // reenvia o buffer a cada reconexao, entao a chegada reinicia no F5.
   const ultimoTs = ultimo ? new Date(ultimo.ts_evento).getTime() : null;
@@ -51,7 +58,6 @@ export default function AoVivo({ vivo }: { vivo: EstadoAoVivo }) {
 
   // A execucao e um replay ou o feed de verdade? E ela ainda esta chegando?
   // Procedencia vem da linha; atividade a API deriva do relogio.
-  const meta = replaysApi.dados?.find((r) => r.replay_id === replayId);
   const eReplay = (meta?.fonte ?? "replay") === "replay";
   const emCurso = meta?.em_curso ?? !parado;
   const rotuloOrigem = `${eReplay ? "Replay" : "OpenF1"} · ${emCurso ? "em curso" : "encerrado"}`;
@@ -97,7 +103,7 @@ export default function AoVivo({ vivo }: { vivo: EstadoAoVivo }) {
       </Faixa>
 
       <div className="kpis">
-        <Kpi rotulo="Voltas recebidas" valor={fmtInt(eventos.length)} detalhe={replayId ?? "nenhuma execução ainda"} />
+        <Kpi rotulo="Voltas recebidas" valor={fmtInt(recebidas)} detalhe={replayId ?? "nenhuma execução ainda"} />
         <Kpi rotulo="Última volta" valor={ultimo ? `${ultimo.piloto} · V${ultimo.lap_number}` : "—"}
              detalhe={ultimo ? `chegou ${fmtHaData(ultimo.ts_evento, agora)}` : undefined} />
         <Kpi rotulo="Latência do pipeline" valor={fmtMs(ultimaLatencia)} detalhe={`mediana ${fmtMs(mediana)}`} />
@@ -107,9 +113,9 @@ export default function AoVivo({ vivo }: { vivo: EstadoAoVivo }) {
       {progresso !== null && totalVoltas && (
         <div className="progresso">
           <label htmlFor="progresso-replay">
-            Replay da corrida: {fmtInt(eventos.length)} de {fmtInt(totalVoltas)} voltas ({progresso}%)
+            Replay da corrida: {fmtInt(recebidas)} de {fmtInt(totalVoltas)} voltas ({progresso}%)
           </label>
-          <progress id="progresso-replay" max={totalVoltas} value={Math.min(eventos.length, totalVoltas)} />
+          <progress id="progresso-replay" max={totalVoltas} value={Math.min(recebidas, totalVoltas)} />
         </div>
       )}
 

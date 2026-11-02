@@ -88,6 +88,10 @@ class Replay(BaseModel):
     circuito: Optional[str] = None
     eventos: int
     ultimo_evento: datetime
+    # Contagens da execução inteira. O front não pode contá-las pelo SSE: o buffer dele
+    # guarda só as voltas mais recentes, e o placar travava no meio da corrida.
+    aptos_modelo: int = 0
+    com_predicao: int = 0
     # Voltas que a corrida tem no histórico (Silver): o denominador do progresso do replay.
     voltas_na_corrida: Optional[int] = None
     # De onde o dado veio: "replay" (corrida reproduzida) ou "openf1" (feed ao vivo).

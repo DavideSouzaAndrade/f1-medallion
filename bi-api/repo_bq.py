@@ -156,6 +156,8 @@ class RepoBigQuery:
               GROUP BY session_key)
             SELECT v.replay_id, v.session_key, ANY_VALUE(v.circuito) AS circuito,
                    COUNT(*) AS eventos, MAX(v.ts_evento) AS ultimo_evento,
+                   COUNTIF(v.apto_modelo) AS aptos_modelo,
+                   COUNTIF(v.tempo_previsto_s IS NOT NULL) AS com_predicao,
                    ANY_VALUE(t.voltas_na_corrida) AS voltas_na_corrida,
                    -- Procedência: vem da linha, porque é propriedade dela.
                    -- Linha antiga, de antes da coluna existir, é replay:

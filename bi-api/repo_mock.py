@@ -182,6 +182,8 @@ class RepoMock:
             grupos.setdefault(e["replay_id"], []).append(e)
         return [{"replay_id": r, "session_key": SESSAO_AO_VIVO, "circuito": SESSOES[SESSAO_AO_VIVO][1],
                  "eventos": len(es), "ultimo_evento": es[-1]["ts_evento"],
+                 "aptos_modelo": sum(e["apto_modelo"] for e in es),
+                 "com_predicao": sum(e["tempo_previsto_s"] is not None for e in es),
                  "voltas_na_corrida": SESSOES[SESSAO_AO_VIVO][4] * len(PILOTOS),
                  "fonte": "replay",
                  "em_curso": (datetime.now(timezone.utc) - es[-1]["ts_evento"]).total_seconds()
