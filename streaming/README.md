@@ -53,6 +53,7 @@ expõe numa consulta só.
 | [`test_montagem.py`](test_montagem.py) | verificações offline, usando o gerador de verdade |
 | [`setup.py`](setup.py) | empacota `contrato.py` e `montagem.py` para o worker |
 | [`subir.sh`](subir.sh) / [`parar.sh`](parar.sh) | ligar e desligar o job |
+| [`auditar.sh`](auditar.sh) | confere o que foi gravado, contra as regras e contra o lote |
 
 ## Como executar
 
@@ -71,6 +72,30 @@ reordenação dentro de uma janela deslizante (como o Pub/Sub reordena) e
 colheita intercalada (como o timer do Beam dispara). Rodar tudo e conferir
 no fim passava com o código errado — ver
 [docs/caso-carencia-reordenacao.md](../docs/caso-carencia-reordenacao.md).
+
+### Auditar o que foi gravado
+
+```bash
+bash streaming/auditar.sh                      # a última execução
+bash streaming/auditar.sh replay-2026...-abc   # uma específica
+```
+
+Os testes offline provam que a **regra** está certa; a auditoria prova que
+o que chegou ao BigQuery **respeita** a regra. São coisas diferentes, e só
+a segunda pega erro de escrita, de schema ou de deduplicação.
+
+Treze verificações, entre integridade (`evento_id` duplicado, chave natural
+duplicada, `NOT NULL` vazia), faixas (`lap_number`, `duracao_s`,
+`idade_pneu`), coerência (soma dos setores contra a duração), contrato do
+modelo (apta sem previsão, previsão em volta inapta) e comparação com a
+`silver_voltas` da mesma corrida.
+
+A comparação com o lote olha **só as voltas completas**: a volta cortada
+pelo fim do replay não tem duração e o lote tem, e divergir ali é esperado,
+não defeito.
+
+Sai com código 1 se qualquer verificação falhar — dá para pendurar numa
+tarefa do Airflow.
 
 ### Rodar na máquina, contra o Pub/Sub real
 
