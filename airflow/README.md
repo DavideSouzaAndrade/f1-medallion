@@ -234,22 +234,32 @@ com Python 3.10–3.14) e o código do pipeline não depende de versão, mas o
 worker não é o mesmo binário — ao comparar medições, vale conferir de onde o
 job foi lançado.
 
-## Sessão da interface sobrevivendo a reinício
+## Chave de sessão da interface
 
-A chave que assina o cookie de sessão não está no repositório — segredo em
-repositório público não é segredo. Por padrão o Airflow gera uma na subida,
-e o custo é que **ela muda a cada reinício do webserver, derrubando quem
-estava logado**. Com `restart: unless-stopped` isso acontece sozinho.
+A chave que assina o cookie de sessão **não está no repositório** — segredo
+em repositório público não é segredo.
 
-Para a sessão sobreviver, defina antes do `up`:
+**Na VM**, o `provisionar-vm.sh` gera uma em `/var/lib/f1-airflow-secret` no
+primeiro boot e a escreve num `.env` que o Compose lê sozinho. O arquivo
+fica fora do repositório baixado (que é sobrescrito a cada provisionamento),
+então a sessão sobrevive a reinício e quem estava logado continua.
+
+**Localmente**, defina antes do `up`:
 
 ```bash
 export AIRFLOW_SECRET_KEY="$(openssl rand -hex 32)"
 docker compose up -d
 ```
 
-Vale fazer isso na véspera da apresentação: cair da sessão no meio da demo é
-um susto evitável.
+### Uma chave vazia é pior que nenhuma
+
+O Airflow precisa de uma chave **não vazia** para assinar sessão e CSRF.
+Definir a variável como string vazia quebra o `/login/` com HTTP 500 — e é
+pior do que não definir, porque o Airflow deixa de gerar a dele.
+
+E o sintoma engana: `/health` e a API REST continuam respondendo 200, porque
+nenhum dos dois passa por sessão. Só a interface quebra. O
+`provisionar-vm.sh` agora confere o `/login/` no fim, justamente por isso.
 
 ## Consultar o estado sem abrir a interface
 

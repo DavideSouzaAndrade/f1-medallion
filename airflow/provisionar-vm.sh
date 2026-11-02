@@ -93,6 +93,25 @@ chown -R 50000:0 "$RAIZ"
 chmod -R u+rwX "$RAIZ"
 
 cd "$RAIZ/airflow" || morrer "nao achei $RAIZ/airflow"
+
+# Chave de sessao da interface, gerada aqui e guardada num .env que o
+# Compose le sozinho. Nunca vai para o repositorio.
+#
+# Nao e so conforto: o Airflow precisa de uma chave NAO VAZIA para assinar
+# sessao e CSRF. Deixar a variavel definida como string vazia quebra o
+# /login/ com HTTP 500 -- e pior que nao definir, porque o Airflow deixa de
+# gerar a dele.
+#
+# O arquivo fica FORA do repositorio baixado (que e sobrescrito a cada
+# provisionamento) e sobrevive a reinicio, entao quem estava logado continua.
+CHAVE=/var/lib/f1-airflow-secret
+if [[ ! -s "$CHAVE" ]]; then
+  marca "gerando a chave de sessao da interface"
+  (openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n') > "$CHAVE"
+  chmod 600 "$CHAVE"
+fi
+printf 'AIRFLOW_SECRET_KEY=%s\n' "$(cat "$CHAVE")" > "$RAIZ/airflow/.env"
+chown 50000:0 "$RAIZ/airflow/.env" && chmod 600 "$RAIZ/airflow/.env"
 marca "construindo a imagem (gcloud + venv do Beam); leva de 5 a 12 min"
 if ! docker compose build >/tmp/build.log 2>&1; then
   marca "build falhou; ultimas 25 linhas:"; tail -25 /tmp/build.log; exit 1
@@ -135,4 +154,15 @@ if [[ -z "${conta// /}" ]] || echo "$conta" | grep -qi "error\|credential"; then
 fi
 marca "projeto do gcloud: $(docker compose exec -T scheduler gcloud config get-value project 2>/dev/null | tr -d '\r')"
 marca "o venv do Beam responde: $(docker compose exec -T scheduler /opt/beam/bin/python -c 'import apache_beam; print(apache_beam.__version__)' 2>&1 | tr -d '\r')"
+# A interface, e nao so o /health. O /health nao passa por sessao nem CSRF,
+# entao ele responde 200 com o login quebrado -- foi assim que uma chave de
+# sessao vazia passou despercebida ate alguem tentar entrar.
+codigo=$(docker compose exec -T scheduler \
+  python -c "import urllib.request;print(urllib.request.urlopen('http://webserver:8080/login/',timeout=20).status)" 2>/dev/null || echo "erro")
+marca "pagina de login: HTTP ${codigo}"
+if [[ "$codigo" != "200" ]]; then
+  marca "FALHA: a interface nao abre. Log do webserver:"
+  docker compose logs --tail=20 webserver 2>&1 | sed 's/^/    /'
+  exit 1
+fi
 marca "PROVISIONAMENTO CONCLUIDO"
