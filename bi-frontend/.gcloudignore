@@ -1,0 +1,6 @@
+# Sem este arquivo o gcloud aplica o .gitignore no upload e descarta o .env.production que o
+# deploy.sh escreve, e o front sobe sem saber a URL da API.
+.git/
+node_modules/
+dist/
+.env.local

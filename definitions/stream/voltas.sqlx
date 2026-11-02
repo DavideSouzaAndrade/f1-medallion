@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS ${self()} (
   -- Controle do evento
   evento_id          STRING    NOT NULL OPTIONS (description = "UUID por mensagem. O Pub/Sub entrega pelo menos uma vez: a deduplicacao e por este campo."),
   replay_id          STRING    NOT NULL OPTIONS (description = "Uma execucao do gerador. Separa dois replays da mesma corrida."),
+  fonte              STRING    OPTIONS (description = "De onde a mensagem veio: 'replay' para corrida reproduzida da Bronze, 'openf1' para feed ao vivo. E PROCEDENCIA, nao estado: um replay encerrado continua sendo replay. Se a execucao esta em curso se deriva de MAX(_ts_processamento), nao desta coluna."),
   ts_evento          TIMESTAMP NOT NULL OPTIONS (description = "Hora da publicacao no Pub/Sub, em UTC. Define a particao."),
 
   -- Chave natural, a mesma da silver_voltas
@@ -61,7 +62,7 @@ CREATE TABLE IF NOT EXISTS ${self()} (
   chuva              INT64     OPTIONS (description = "0 ou 1, como na silver_voltas."),
 
   -- Acrescentado pelo Dataflow
-  apto_modelo        BOOL      NOT NULL OPTIONS (description = "Composto seco, tempo, idade do pneu e temperatura da pista presentes, e fora do box. A volta inapta e gravada mesmo assim, como na Silver."),
+  apto_modelo        BOOL      NOT NULL OPTIONS (description = "A volta esta no recorte da gold_degradacao_pneu: composto seco, tempo, idade do pneu e temperatura da pista presentes, fora do box, e dentro de 1,15x a mediana da sessao (ao vivo, a mediana das voltas recebidas ate o momento). A volta inapta e gravada mesmo assim, como na Silver, e nao recebe previsao."),
   _ts_processamento  TIMESTAMP NOT NULL OPTIONS (description = "Hora em que o Dataflow processou o evento."),
   latencia_ms        INT64     OPTIONS (description = "_ts_processamento menos ts_evento: o atraso de ponta a ponta do pipeline."),
 
@@ -73,5 +74,5 @@ CREATE TABLE IF NOT EXISTS ${self()} (
 PARTITION BY DATE(ts_evento)
 CLUSTER BY session_key, driver_number
 OPTIONS (
-  description = "Voltas recebidas em tempo real pelo Pub/Sub e gravadas pelo Dataflow. Contrato do evento: v1."
+  description = "Voltas montadas pelo Dataflow a partir do dado bruto da OpenF1 recebido no Pub/Sub, com a previsao da API anexada. Mesmo grao da silver_voltas. Contrato das mensagens: v2 (docs/contrato-openf1.md)."
 )

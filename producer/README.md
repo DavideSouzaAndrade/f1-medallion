@@ -1,20 +1,38 @@
-# Gerador de eventos e camada de streaming (parte 2)
+# Gerador de eventos
 
-O gerador faz o replay de uma corrida real no Pub/Sub: lê as voltas na
-`silver_voltas` e publica uma mensagem por volta, na ordem em que as voltas
-terminaram, com os intervalos reais divididos por um fator de aceleração.
+O gerador faz o replay de uma corrida real no Pub/Sub **no formato em que a
+OpenF1 entrega ao vivo**: lê os registros brutos da corrida na Bronze e
+publica cada um como mensagem, com o mesmo JSON, os campos `_key` e `_id`, e
+os intervalos reais divididos por um fator de aceleração.
 
-O formato de cada mensagem está em
-[docs/contrato-evento.md](../docs/contrato-evento.md).
+Trocar o gerador pela OpenF1 de verdade é trocar a fonte: uma ponte que
+assina o MQTT da OpenF1 e repassa as mensagens para o mesmo tópico. Quem
+consome não percebe a diferença.
+
+O formato das mensagens está em
+[docs/contrato-openf1.md](../docs/contrato-openf1.md).
 
 ## O que esta parte cria
 
 | Recurso | Onde está o código |
 |---------|--------------------|
-| Tópico `f1-voltas`, assinaturas `f1-voltas-dataflow` e `f1-voltas-debug`, dataset `f1_stream` | [`setup/setup_streaming.sh`](../setup/setup_streaming.sh) |
+| Tópico `f1-openf1`, assinaturas `f1-openf1-dataflow` e `f1-openf1-debug`, dataset `f1_stream` | [`setup/setup_streaming.sh`](../setup/setup_streaming.sh) |
 | Tabelas `f1_stream.voltas` e `f1_stream.voltas_dlq` | [`definitions/stream/`](../definitions/stream/) |
 | View `f1_silver.vw_voltas_unificada` (batch ∪ stream) | [`definitions/stream/vw_voltas_unificada.sqlx`](../definitions/stream/vw_voltas_unificada.sqlx) |
 | Cloud Run Job `f1-gerador` | [`producer/deploy.sh`](deploy.sh) |
+
+## Como funciona
+
+| Arquivo | Papel |
+|---------|-------|
+| [`fonte.py`](fonte.py) | Lê da Bronze os registros da corrida, por endpoint, como a OpenF1 entregou |
+| [`cronograma.py`](cronograma.py) | Decide o que a OpenF1 publicaria e quando: as versões de cada volta e de cada stint, na ordem da corrida |
+| [`corrupcao.py`](corrupcao.py) | Copias quebradas de propósito, para a demonstração da DLQ |
+| [`publisher.py`](publisher.py) | Publica no ritmo da corrida acelerada |
+
+Uma corrida (GP da Itália de 2026) vira ~27 mil mensagens: 22 mil de
+`intervals`, 4,1 mil versões de `laps`, 1 mil de `stints` e o resto de
+`weather`, `pit`, `sessions` e `meetings`. No fator 30 o replay leva ~4 min.
 
 ## Como executar
 
@@ -36,81 +54,72 @@ Testar localmente, sem publicar nada:
 ```bash
 cd producer
 pip install -r requirements.txt
-python test_evento.py                                  # contrato, offline
+python test_cronograma.py                              # contrato, offline
 python publisher.py --listar                           # corridas disponíveis
-python publisher.py --session-key 11361 --limite 5 --dry-run
+python publisher.py --session-key 11361 --minutos 2 --dry-run
 ```
 
 Publicar pela nuvem:
 
 ```bash
-# corrida mais recente, 30x mais rápida que a real (~3 min)
+# corrida mais recente, 30x mais rápida que a real (~4 min)
 gcloud run jobs execute f1-gerador --region=us-central1
 
-# corrida, ritmo e 5% de eventos inválidos para exercitar a DLQ
+# corrida, ritmo e 1% de cópias quebradas para exercitar a DLQ
 gcloud run jobs execute f1-gerador --region=us-central1 \
-  --args="--session-key,11361,--fator,60,--injetar-invalidos,0.05"
+  --args="--session-key,11361,--fator,60,--injetar-invalidos,0.01"
 ```
 
 | Parâmetro | Efeito |
 |-----------|--------|
-| `--session-key` | corrida a reproduzir; padrão é a mais recente da Silver |
-| `--fator` | aceleração sobre os intervalos reais entre voltas (padrão 30) |
-| `--intervalo S` | ignora o ritmo real e publica um evento a cada S segundos |
-| `--limite N` | publica só as N primeiras voltas |
-| `--injetar-invalidos F` | fração de eventos quebrados de propósito, de 0 a 1 |
+| `--session-key` | corrida a reproduzir; padrão é a mais recente da Bronze |
+| `--fator` | aceleração sobre os intervalos reais entre mensagens (padrão 30) |
+| `--minutos N` | publica só os N primeiros minutos depois da largada |
+| `--injetar-invalidos F` | fração de cópias quebradas extras, de 0 a 1 |
 | `--semente` | repete o mesmo sorteio de inválidos numa nova execução |
 
 ## Como conferir
 
 ```bash
 # ler mensagens sem roubá-las do Dataflow
-gcloud pubsub subscriptions pull f1-voltas-debug --auto-ack --limit=10
-```
-
-```sql
--- o lado 'stream' cresce enquanto o gerador publica
-SELECT origem, COUNT(*) AS voltas
-FROM `pdm-davi-2026.f1_silver.vw_voltas_unificada`
-GROUP BY origem;
-
--- eventos rejeitados, por motivo
-SELECT motivo, COUNT(*) AS eventos
-FROM `pdm-davi-2026.f1_stream.voltas_dlq`
-GROUP BY motivo;
+gcloud pubsub subscriptions pull f1-openf1-debug --auto-ack --limit=10 \
+  --format="table(message.attributes.topico, message.data.decode(base64).decode(utf-8))"
 ```
 
 ## Decisões
 
-**Replay em vez da API ao vivo.** Fora de um fim de semana de GP a OpenF1 não
-publica nada novo, e o acesso em tempo real durante as sessões é pago. O
-replay usa dado real com ritmo controlado, sem depender do calendário da F1.
+**Replay em vez da OpenF1 ao vivo.** Fora de um fim de semana de GP a OpenF1
+não publica nada novo, e o acesso em tempo real durante as sessões é pago
+(€9,90/mês). O replay usa dado real com ritmo controlado, sem depender do
+calendário da F1.
 
-**Um evento é uma volta concluída.** É a unidade do modelo de degradação de
-pneu. Publicar na ordem em que as voltas terminaram intercala os pilotos
-como na corrida real.
+**Fonte na Bronze, não na Silver.** A Bronze guarda o JSON de cada registro
+exatamente como a OpenF1 entregou. Ler da Silver seria publicar dado já
+tratado e esvaziar o trabalho do Dataflow.
 
-**Dataset `f1_stream` separado.** A fronteira entre o que chegou em lote e o
-que chegou em tempo real fica visível já pelo nome do dataset.
+**Laps e stints em várias versões.** Ao vivo, a OpenF1 publica a volta quando
+o piloto cruza a linha e a completa setor a setor; o stint nasce na troca de
+pneu e o `lap_end` avança a cada volta. A Bronze só tem a versão final, então
+o gerador reconstrói as intermediárias seguindo o código de ingestão da
+própria OpenF1. Publicar só a versão final daria ao Dataflow, no início de um
+stint, a volta em que ele vai terminar.
 
-**Tabelas do stream como `operations` com `CREATE TABLE IF NOT EXISTS`.** Uma
-tabela comum do Dataform é recriada a cada execução, o que apagaria tudo o
-que o streaming já gravou.
+**Começar 1 minuto antes da largada.** A Bronze tem ~1 h de pré-corrida (clima
+e intervalos do grid) que, na demonstração, seria espera sem voltas. Só o
+último registro de clima antes da largada entra, para as primeiras voltas
+não chegarem sem temperatura.
 
-**Partição por `ts_evento`, a hora da chegada.** Num replay ela difere da
-hora original da volta em semanas, e para o stream o que importa é quando o
-dado entrou. O cluster por sessão e piloto repete o da `silver_voltas`.
+**Datas originais no corpo.** `date` e `date_start` são o dado bruto e não são
+reescritos. O instante em que o replay publicou fica no `publish_time` do
+Pub/Sub.
 
-**DLQ como tabela, com partições de 30 dias.** Guardar o evento cru com o
-motivo no BigQuery permite consultar os erros em SQL; a DLQ serve para
-diagnóstico, não é histórico.
+**Inválidos são cópias extras.** O dado bruto já traz defeitos reais (texto
+`"+1 LAP"` em campo numérico, campos nulos), que o Dataflow trata como dado
+normal. As cópias quebradas são o que nenhuma mensagem da OpenF1 traria, e a
+corrida original continua completa.
 
 **Duas assinaturas.** Um `pull` de teste na assinatura do Dataflow consumiria
-a mensagem; a `f1-voltas-debug` existe para inspecionar sem interferir.
-
-**View unificada na Silver, deduplicando por `evento_id`.** O grão é o da
-`silver_voltas`, sem agregação. A deduplicação cobre a entrega "pelo menos
-uma vez" do Pub/Sub.
+a mensagem; a `f1-openf1-debug` existe para inspecionar sem interferir.
 
 **Job sem nova tentativa (`--max-retries=0`).** Uma nova tentativa
-recomeçaria o replay e publicaria voltas duplicadas no tópico.
+recomeçaria o replay e publicaria a corrida duplicada no tópico.
