@@ -189,7 +189,7 @@ with DAG(
         ),
     )
 
-    # A vigilancia e do Davi (bi-api/AIRFLOW.md): 200 quando o stream esta
+    # A vigilancia fica na API de BI (bi-api/AIRFLOW.md): 200 quando o stream esta
     # recente, a latencia p95 esta no limite e a DLQ nao explodiu; 503 em
     # qualquer falha, o que o sensor entende sozinho.
     esperar_stream_saudavel = HttpSensor(

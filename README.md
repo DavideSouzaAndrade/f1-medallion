@@ -18,6 +18,8 @@ temporadas 2023 em diante.
 **Volume:** ~400 milhões de registros brutos (car_data + location),
 aproximadamente 60 GB em JSON não comprimido.
 
+**Equipe:** Davi Andrade, Frederico Relvas, Gustavo Novack e Henrick de Souza.
+
 ---
 
 ## Arquitetura

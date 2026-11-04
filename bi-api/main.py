@@ -1,5 +1,5 @@
 """
-API de BI — F1 Medallion, front-end analítico (Davi).
+API de BI — F1 Medallion, front-end analítico.
 
 Expõe ao front o que está no BigQuery (Silver/Gold e o stream do Dataflow). O navegador só
 fala com esta API: nunca com o BigQuery, e sem credencial da GCP.

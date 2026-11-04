@@ -74,11 +74,11 @@ lote dá o histórico e o modelo; o streaming dá o agora; a view
 O trabalho foi dividido em três frentes com contratos escritos entre elas.
 Cada contrato é um documento, não uma conversa.
 
-| frente | responsável | entrega | contrato que publica |
-|---|---|---|---|
-| **A — gerador** | Fred | replay da corrida no Pub/Sub | [`contrato-openf1.md`](contrato-openf1.md) |
-| **B — Dataflow** | Gustavo | monta a volta, prevê, orquestra | [`contrato-evento.md`](contrato-evento.md), tabelas de `f1_stream` |
-| **C — BI e modelo** | Davi | API de predição, API de BI, front | [`bi-api/AIRFLOW.md`](../bi-api/AIRFLOW.md) |
+| frente | entrega | contrato que publica |
+|---|---|---|
+| **A — gerador** | replay da corrida no Pub/Sub | [`contrato-openf1.md`](contrato-openf1.md) |
+| **B — Dataflow** | monta a volta, prevê, orquestra | [`contrato-evento.md`](contrato-evento.md), tabelas de `f1_stream` |
+| **C — BI e modelo** | API de predição, API de BI, front | [`bi-api/AIRFLOW.md`](../bi-api/AIRFLOW.md) |
 
 O que torna isso funcional: **as frentes se testam contra o contrato da
 outra, não contra a implementação**. O teste do Dataflow monta a corrida

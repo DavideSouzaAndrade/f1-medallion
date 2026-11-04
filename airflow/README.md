@@ -335,7 +335,7 @@ interface:
 | Connection | Para quê | Variável |
 |---|---|---|
 | `f1_api` | aquecer e vigiar a API do modelo | `AIRFLOW_CONN_F1_API` |
-| `f1_bi_api` | as checagens de saúde do Davi | `AIRFLOW_CONN_F1_BI_API` |
+| `f1_bi_api` | as checagens de saúde da API de BI | `AIRFLOW_CONN_F1_BI_API` |
 
 Os padrões apontam para os serviços atuais. Para mudar, defina
 `F1_API_URL` e `F1_BI_API_URL` antes do `docker compose up`.
