@@ -20,6 +20,8 @@ aproximadamente 60 GB em JSON não comprimido.
 
 **Equipe:** Davi Andrade, Frederico Relvas, Gustavo Novack e Henrick de Souza.
 
+**No ar, no Cloud Run:** o modelo como API REST em [f1-api-418113305910.us-central1.run.app/docs](https://f1-api-418113305910.us-central1.run.app/docs) e o front de BI em [f1-bi-frontend-418113305910.us-central1.run.app](https://f1-bi-frontend-418113305910.us-central1.run.app).
+
 ---
 
 ## Arquitetura
