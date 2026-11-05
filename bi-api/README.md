@@ -77,7 +77,7 @@ bash deploy.sh                 # Cloud Run (DEMO=1: min-instances=1)
 |---|---|---|
 | `GCP_PROJECT` | `pdm-davi-2026` | projeto do BigQuery |
 | `MOCK` | `0` | `1` usa dados simulados |
-| `CORS_ORIGINS` | `http://localhost:5173` | origens do front, separadas por vírgula |
+| `CORS_ORIGINS` | `http://localhost:5173` | origens do front, separadas por vírgula. O `deploy.sh` já passa o localhost e as duas URLs do front de produção |
 | `STREAM_POLL_S` | `3` | ciclo da consulta que alimenta o SSE |
 | `CACHE_S` | `60` | cache do histórico (o stream nunca é cacheado) |
 | `BQ_MAX_BYTES` | 10 GB | teto de bytes lidos por consulta |

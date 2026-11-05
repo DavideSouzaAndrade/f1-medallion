@@ -3,8 +3,9 @@ import {
   CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { PrevistoReal as Dados, Replay } from "../api";
-import { Cartao, Carga, Kpi, Legenda, SeloOrigem, Tip, Vazio } from "../components/ui";
-import { fmtDec, fmtInt, fmtVolta } from "../format";
+import { Cartao, Carga, Faixa, Kpi, Legenda, SeloOrigem, Tip, Vazio } from "../components/ui";
+import { completa, execucaoPadrao, rotuloExecucao } from "../execucoes";
+import { escalaComum, fmtDec, fmtInt, fmtVolta } from "../format";
 import { useApi } from "../hooks";
 
 const dominio = [(min: number) => Math.floor(min - 1), (max: number) => Math.ceil(max + 1)] as [
@@ -12,8 +13,16 @@ const dominio = [(min: number) => Math.floor(min - 1), (max: number) => Math.cei
 
 export default function PrevistoReal() {
   const replays = useApi<Replay[]>("/api/stream/replays", {}, 15000);
-  const [escolhido, setEscolhido] = useState<string | null>(null);
-  const replayId = escolhido ?? replays.dados?.[0]?.replay_id;
+  const [escolhido, setEscolhido] = useState<string | null>(null);   // escolha da pessoa no seletor
+  // Sem escolha, a mais recente que esteja em curso ou completa (ver execucaoPadrao). Guarda a anterior
+  // para não trocar de corrida sozinha; o ajuste durante a renderização é o padrão do React para isso.
+  const [automatico, setAutomatico] = useState<string | undefined>();
+  const padrao = execucaoPadrao(replays.dados ?? [], automatico);
+  if (padrao !== automatico) setAutomatico(padrao);
+  const replayId = escolhido ?? padrao;
+  const meta = replays.dados?.find((r) => r.replay_id === replayId);
+  const parcial = meta && !meta.em_curso && !completa(meta) ? meta : null;
+  const completaRecente = replays.dados?.find(completa);
 
   // Só consulta depois de saber qual execução do gerador mostrar.
   const q = useApi<Dados>("/api/previsto-real", replays.dados ? { replay_id: replayId, limite: 400 } : null, 5000);
@@ -28,9 +37,10 @@ export default function PrevistoReal() {
     .map((p) => ({ volta: p.lap_number, real: p.duracao_s, previsto: p.tempo_previsto_s }))
     .sort((a, b) => a.volta - b.volta), [pares, piloto]);
   const dispersao = useMemo(() => pares.map((p) => ({ real: p.duracao_s, previsto: p.tempo_previsto_s })), [pares]);
-  const faixa = useMemo(() => {
-    const todos = dispersao.flatMap((d) => [d.real, d.previsto]);
-    return todos.length ? [Math.min(...todos), Math.max(...todos)] : [0, 0];
+  const escala = useMemo(() => escalaComum(dispersao.flatMap((d) => [d.real, d.previsto])), [dispersao]);
+  const faixas = useMemo(() => {
+    const ext = (vs: number[]) => (vs.length ? `${fmtVolta(Math.min(...vs))} a ${fmtVolta(Math.max(...vs))}` : "—");
+    return { real: ext(dispersao.map((d) => d.real)), previsto: ext(dispersao.map((d) => d.previsto)) };
   }, [dispersao]);
 
   return (
@@ -40,7 +50,7 @@ export default function PrevistoReal() {
           Execução do gerador
           <select value={replayId ?? ""} onChange={(e) => setEscolhido(e.target.value)} disabled={!replays.dados?.length}>
             {(replays.dados ?? []).map((r) => (
-              <option key={r.replay_id} value={r.replay_id}>{r.replay_id} · {r.circuito ?? r.session_key}</option>
+              <option key={r.replay_id} value={r.replay_id}>{rotuloExecucao(r)}</option>
             ))}
           </select>
         </label>
@@ -51,6 +61,17 @@ export default function PrevistoReal() {
           </select>
         </label>
       </div>
+
+      {parcial && (
+        <Faixa tipo="aviso">
+          <span>
+            Amostra pequena: esta execução tem {fmtInt(parcial.eventos)}
+            {parcial.voltas_na_corrida ? <> de {fmtInt(parcial.voltas_na_corrida)}</> : null} voltas da corrida.
+            Com poucas voltas as entradas do modelo quase não variam e a previsão sai quase constante.
+            {completaRecente && <> A execução completa mais recente é <b>{completaRecente.replay_id}</b>.</>}
+          </span>
+        </Faixa>
+      )}
 
       <Carga q={q} vazio={null} ehVazio={() => false}>
         {(d) => d.metricas.voltas === 0 ? (
@@ -93,21 +114,27 @@ export default function PrevistoReal() {
                 <Legenda itens={[{ rotulo: "Real", cor: "var(--ink-2)" }, { rotulo: "Previsto (tracejado)", cor: "var(--s3)" }]} />
               </Cartao>
 
-              <Cartao titulo="Previsto × real, todas as voltas" sub="quanto mais perto da diagonal, melhor"
+              <Cartao titulo="Previsto × real, todas as voltas" sub="mesma escala nos dois eixos: quanto mais perto da diagonal, melhor"
                       selo={<SeloOrigem origem="stream" />}>
                 <ResponsiveContainer width="100%" height={300}>
                   <ScatterChart margin={{ top: 8, right: 12, bottom: 16, left: 0 }}>
                     <CartesianGrid />
-                    <XAxis type="number" dataKey="real" name="Real" domain={dominio} tickFormatter={fmtVolta}
+                    <XAxis type="number" dataKey="real" name="Real" domain={escala?.dominio} ticks={escala?.ticks}
+                           tickFormatter={fmtVolta}
                            label={{ value: "Real", position: "insideBottom", offset: -8, className: "recharts-text" }} />
-                    <YAxis type="number" dataKey="previsto" name="Previsto" domain={dominio} tickFormatter={fmtVolta} width={72}
+                    <YAxis type="number" dataKey="previsto" name="Previsto" domain={escala?.dominio} ticks={escala?.ticks}
+                           tickFormatter={fmtVolta} width={72}
                            label={{ value: "Previsto", angle: -90, position: "insideLeft", offset: 4, className: "recharts-text" }} />
-                    <ReferenceLine segment={[{ x: faixa[0], y: faixa[0] }, { x: faixa[1], y: faixa[1] }]}
-                                   stroke="var(--ink-2)" strokeDasharray="4 4" />
+                    {escala && (
+                      <ReferenceLine segment={[{ x: escala.dominio[0], y: escala.dominio[0] }, { x: escala.dominio[1], y: escala.dominio[1] }]}
+                                     stroke="var(--ink-2)" strokeDasharray="4 4" />
+                    )}
                     <Tooltip content={<Tip titulo={() => "Volta"} valor={(v) => fmtVolta(v as number)} />} />
                     <Scatter data={dispersao} fill="var(--stream)" fillOpacity={0.75} isAnimationActive={false} />
                   </ScatterChart>
                 </ResponsiveContainer>
+                <Legenda itens={[{ rotulo: "Tracejado: previsão perfeita (previsto = real)", cor: "var(--ink-2)" }]} />
+                <div className="legenda">Previsto de {faixas.previsto} · real de {faixas.real}</div>
               </Cartao>
             </div>
           </>

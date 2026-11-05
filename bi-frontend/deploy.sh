@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Publica o front no Cloud Run (nginx servindo o build do Vite).
-#   bash bi-frontend/deploy.sh
+#   bash bi-frontend/deploy.sh          -> min-instances=0
+#   DEMO=1 bash bi-frontend/deploy.sh   -> min-instances=1 (véspera e dia da apresentação)
 # Pré-requisito: a API de BI já no ar (bash bi-api/deploy.sh).
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -9,9 +10,10 @@ PROJECT="${PROJECT:-pdm-davi-2026}"
 REGION="${REGION:-us-central1}"
 SERVICE="${SERVICE:-f1-bi-frontend}"
 API_SERVICE="${API_SERVICE:-f1-bi-api}"
+MIN_INST=$([ "${DEMO:-0}" = "1" ] && echo 1 || echo 0)
 
 API_URL=$(gcloud run services describe "$API_SERVICE" --project "$PROJECT" --region "$REGION" --format 'value(status.url)')
-echo ">> API de BI: $API_URL"
+echo ">> API de BI: $API_URL · front com min-instances=$MIN_INST"
 # O Vite embute VITE_API_URL no build. O arquivo precisa subir junto com o código: ver .gcloudignore.
 echo "VITE_API_URL=$API_URL" > .env.production
 
@@ -19,7 +21,7 @@ gcloud run deploy "$SERVICE" \
   --project "$PROJECT" --region "$REGION" \
   --source . \
   --allow-unauthenticated \
-  --memory 256Mi --cpu 1 --min-instances 0 --max-instances 2 \
+  --memory 256Mi --cpu 1 --min-instances "$MIN_INST" --max-instances 2 \
   --labels "projeto=f1-medallion,parte=frontend"
 
 FRONT=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format 'value(status.url)')

@@ -30,12 +30,14 @@ cd ../bi-api && MOCK=1 uvicorn main:app --port 8080
 # terminal 2
 npm run dev                 # http://localhost:5173  (o Vite encaminha /api para a porta 8080)
 
-npm test                    # formatadores
+npm test                    # formatadores e escolha da execução
 npm run build               # tsc + build de produção
 ```
 
-Em produção: `bash deploy.sh` (Cloud Run + nginx). Ele lê a URL da API de BI e a embute no build
-(`VITE_API_URL`). Depois, libere a URL do front no CORS da API (`CORS_ORIGINS`).
+Em produção: `bash deploy.sh` (Cloud Run + nginx). Ele lê a URL da API de BI, a embute no build
+(`VITE_API_URL`) e libera as duas URLs do front no CORS da API (`CORS_ORIGINS`). O deploy da API já
+usa essa mesma lista como padrão, então redeployar só a API não tira o front do ar.
+`DEMO=1 bash deploy.sh` deixa uma instância sempre ligada (véspera e dia da apresentação).
 
 ## Estrutura
 
