@@ -62,3 +62,24 @@ export function dominioRobusto(tempos: number[]): [number, number] | undefined {
   const normais = ordenado.filter((t) => t >= mediana * 0.9 && t <= mediana * 1.12);
   return [Math.floor(normais[0] - 0.5), Math.ceil(normais[normais.length - 1] + 1)];
 }
+
+/**
+ * Uma escala só para os DOIS eixos do gráfico previsto × real.
+ *
+ * Com escalas independentes, cada eixo se ajustava à própria faixa (real de 1:33 a 1:50, previsto de
+ * 1:35 a 1:39): a diagonal y = x saía da área visível e um modelo que prevê quase sempre o mesmo
+ * valor parecia razoável. Com a mesma escala, a diagonal vai de canto a canto e esse modelo aparece
+ * como uma faixa horizontal, que é o que ele é. Não corta extremos (safety car): aqui eles são
+ * justamente o erro que o gráfico precisa mostrar.
+ */
+export function escalaComum(valores: number[]): { dominio: [number, number]; ticks: number[] } | undefined {
+  const v = valores.filter(Number.isFinite);
+  if (v.length === 0) return undefined;
+  const min = Math.min(...v), max = Math.max(...v);
+  const passo = [1, 2, 5, 10, 15, 30, 60].find((p) => (max - min) / p <= 5) ?? 120;
+  let lo = Math.floor(min / passo) * passo, hi = Math.ceil(max / passo) * passo;
+  if (lo === hi) { lo -= passo; hi += passo; }
+  const ticks: number[] = [];
+  for (let t = lo; t <= hi; t += passo) ticks.push(t);
+  return { dominio: [lo, hi], ticks };
+}

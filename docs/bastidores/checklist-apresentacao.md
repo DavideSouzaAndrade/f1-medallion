@@ -38,6 +38,31 @@ curl -s -o /dev/null -w "%{http_code} em %{time_total}s\n" \
        "temp_ar":32.4,"umidade":37.5,"circuito":"Monza","circuit_type":"Permanent"}]}'
 ```
 
+**A API de BI e o front têm o mesmo problema.** Os dois estão com
+`min-instances=0`: desligam sozinhos quando ninguém usa e, no primeiro acesso
+depois disso, levam alguns segundos para ligar, mais a primeira consulta ao
+BigQuery. É o "Conectando…" na frente do professor, e também a espera que os
+sensores do Airflow encontram ao chamar a API de BI. Ligar uma instância de
+cada:
+
+```bash
+gcloud run services update f1-bi-api      --region=us-central1 --min-instances=1
+gcloud run services update f1-bi-frontend --region=us-central1 --min-instances=1
+```
+
+Custo: não medido. Os dois são menores que a f1-api (512 MiB e 256 MiB,
+contra 2 GiB), então deve ficar abaixo dos ~US$ 1,20 por dia dela.
+**Desligar depois da apresentação:**
+
+```bash
+gcloud run services update f1-bi-api      --region=us-central1 --min-instances=0
+gcloud run services update f1-bi-frontend --region=us-central1 --min-instances=0
+```
+
+**Se precisar redeployar um dos dois depois de ligar**, use `DEMO=1`
+(`DEMO=1 bash bi-api/deploy.sh`, `DEMO=1 bash bi-frontend/deploy.sh`). Sem
+ele, o deploy volta a instância para zero.
+
 ### 2. Subir o Airflow local, para a interface
 
 ```bash
@@ -130,16 +155,27 @@ https://f1-bi-frontend-418113305910.us-central1.run.app
 
 O Cloud Run expõe cada serviço em **duas** URLs — uma com o número do
 projeto e outra com um hash (`f1-bi-frontend-ytz2c7b2wq-uc.a.run.app`). As
-duas servem a mesma página, mas o `CORS_ORIGINS` da API de BI só libera a
-primeira, e o navegador manda a origem exata. Pela URL de hash, todas as
-telas mostram **"Não foi possível falar com a API de BI"** — parece a API
-fora do ar, e não é.
+duas servem a mesma página, e a API de BI só responde às origens listadas no
+`CORS_ORIGINS`; o navegador manda a origem exata. Os dois `deploy.sh` (o do
+front e, agora por padrão, o da API) liberam as duas URLs. Se alguma delas
+mostrar **"Não foi possível falar com a API de BI"** em todas as telas, a
+lista foi sobrescrita: parece a API fora do ar, e não é. Rode
+`bash bi-frontend/deploy.sh` de novo, que regrava a lista.
 
 As quatro telas: Histórico, Ao vivo, Previsto × Real, Saúde.
 
-Na tela **Previsto × Real**, selecione uma execução. Sem filtro o MAE
-mostra ~11 s, porque mistura execuções de outubro no contrato v1; filtrando
-pela execução do dia, mostra o número real (4,09 s na de 01/11).
+Na tela **Previsto × Real**, confira qual execução está selecionada. A
+tela abre na mais recente que esteja **em curso ou completa**, e o seletor
+mostra quantas voltas cada uma tem ("151 de 1.108 voltas"). Uma execução
+curta (um teste de 6 voltas, por exemplo) mostra a faixa **"Amostra
+pequena"**: com tão poucas voltas a previsão sai quase constante e o modelo
+parece pior do que é. Na execução do dia, o MAE foi de 4,09 s (01/11).
+
+O gráfico de dispersão usa a **mesma escala nos dois eixos**, então a
+diagonal tracejada (previsto = real) vai de canto a canto. Se perguntarem
+por que os pontos formam uma faixa quase horizontal: o modelo é uma regressão
+linear e prevê numa faixa estreita (84,9 a 87,7 s em Monza, contra 83,5 a
+98,8 s reais, com o pico no safety car). O gráfico mostra isso como é.
 
 ### 7. Garantir que não há job do Dataflow de pé 💰
 
@@ -280,6 +316,8 @@ bash producer/parar.sh            # se a corrida em tempo real ainda estiver rod
 ESPERAR=1 bash streaming/parar.sh # só se a DAG não tiver drenado sozinha
 gcloud compute instances stop f1-airflow --zone=us-central1-a
 gcloud run services update f1-api --region=us-central1 --min-instances=0
+gcloud run services update f1-bi-api      --region=us-central1 --min-instances=0
+gcloud run services update f1-bi-frontend --region=us-central1 --min-instances=0
 gcloud dataflow jobs list --region=us-central1 --status=active   # tem que vir vazio
 ```
 
@@ -295,7 +333,9 @@ gcloud dataflow jobs list --region=us-central1 --status=active   # tem que vir v
 | `subir_dataflow` falha com "já existe job ativo" | sobrou job da véspera | `ESPERAR=1 bash streaming/parar.sh` e disparar de novo |
 | DLQ com muita coisa | normal: o gerador injeta 1% de propósito | mostrar como recurso, não como defeito |
 | `Could not resolve host` / `NameResolutionError` / `nodename nor servname provided` | **DNS, não o projeto** — em 01/11 a causa foi uma **VPN ativa** | desligar a VPN. Testar com `python3 -c "import socket; print(socket.gethostbyname('"'"'github.com'"'"'))"` |
-| front mostra "Não foi possível falar com a API de BI" | URL errada do front: o `CORS_ORIGINS` libera só a de número de projeto | abrir `https://f1-bi-frontend-418113305910.us-central1.run.app` |
+| front mostra "Não foi possível falar com a API de BI" | o `CORS_ORIGINS` da API não lista a URL aberta (alguém sobrescreveu a lista) | abrir `https://f1-bi-frontend-418113305910.us-central1.run.app`; depois, `bash bi-frontend/deploy.sh` regrava a lista |
+| primeira tela demora ou fica em "Conectando…" | partida a frio: API de BI ou front com `min-instances=0` | esperar uns segundos e recarregar; para não acontecer, item 1 da véspera |
+| "Previsto × Real" com previsão quase constante | execução curta selecionada (faixa "Amostra pequena") | trocar no seletor para a execução completa ou a em curso |
 
 **A carta na manga:** se o ao vivo falhar, o BigQuery tem as execuções
 anteriores. `SELECT ... FROM f1_stream.voltas WHERE tempo_previsto_s IS NOT
